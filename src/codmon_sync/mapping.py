@@ -15,7 +15,19 @@ _LOGGER = logging.getLogger(__name__)
 
 EventKind = Literal["bottle", "sleep", "solids", "activity", "temperature", "diaper"]
 
-_OUTDOOR_KEYWORDS = ("散歩", "公園", "園庭", "外遊び", "戸外")
+_OUTDOOR_KEYWORDS = (
+    "散歩",
+    "公園",
+    "園庭",
+    "外遊び",
+    "戸外",
+    "水遊び",
+    "ウッドデッキ",
+    "屋上",
+    "芝生",
+    "裸足",
+    "外気浴",
+)
 _ACTIVITY_START = time(9, 30)
 
 _POO_CONSISTENCY = {
