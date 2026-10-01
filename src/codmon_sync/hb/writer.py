@@ -174,7 +174,6 @@ class HuckleberryWriter:
             "offset": offset,
             "amount": amount,
             "units": units,
-            "notes": event.payload.get("note") or None,
         }
         health_ref = client.collection("health").document(child)
         await health_ref.collection("data").document(interval_id).set(_without_none(entry))
@@ -194,7 +193,6 @@ class HuckleberryWriter:
                 "offset": offset,
                 "amount": amount,
                 "units": units,
-                "notes": entry["notes"],
                 "multientry_key": None,
             }
             await health_ref.set(

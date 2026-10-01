@@ -112,7 +112,7 @@ def plan_events(
                     kind="temperature",
                     start=_combine(day, measurement.time, tz),
                     end=None,
-                    payload={"amount": measurement.value, "units": "C", "note": measurement.source_note},
+                    payload={"amount": measurement.value, "units": "C"},
                 )
             )
 
