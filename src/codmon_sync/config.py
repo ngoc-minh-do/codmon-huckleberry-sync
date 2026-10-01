@@ -34,6 +34,7 @@ class Config:
     llm_base_url: str
     llm_model: str
     llm_api_key: str | None
+    llm_timeout: int
 
     @property
     def timezone(self) -> ZoneInfo:
@@ -91,6 +92,7 @@ def load_config(env_path: Path | None = None, *, dry_run: bool | None = None) ->
     data_dir = Path(os.environ.get("DATA_DIR", default_data_dir)).expanduser()
     translate_activity = _parse_bool(os.environ.get("TRANSLATE_ACTIVITY"), False)
     llm_base_url = (os.environ.get("LLM_BASE_URL") or "").strip().rstrip("/")
+    llm_timeout = _parse_int(os.environ.get("LLM_TIMEOUT"), 180)
     if translate_activity and not llm_base_url:
         raise ConfigError("TRANSLATE_ACTIVITY is true but LLM_BASE_URL is not set")
     return Config(
@@ -113,4 +115,5 @@ def load_config(env_path: Path | None = None, *, dry_run: bool | None = None) ->
         llm_base_url=llm_base_url,
         llm_model=os.environ.get("LLM_MODEL", "chat-default").strip(),
         llm_api_key=os.environ.get("LLM_API_KEY") or None,
+        llm_timeout=llm_timeout,
     )

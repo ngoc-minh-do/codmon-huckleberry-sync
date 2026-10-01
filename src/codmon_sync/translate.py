@@ -18,7 +18,6 @@ _SYSTEM_PROMPT = (
 )
 
 _BATCH_SIZE = 15
-_TIMEOUT = aiohttp.ClientTimeout(total=60)
 
 
 @dataclass(frozen=True)
@@ -26,6 +25,7 @@ class LlmConfig:
     base_url: str
     model: str
     api_key: str | None = None
+    timeout: int = 180
 
 
 class ActivityTranslator:
@@ -38,7 +38,14 @@ class ActivityTranslator:
     def from_config(cls, cfg: Config) -> ActivityTranslator:
         if not cfg.translate_activity:
             return cls(config=None)
-        return cls(config=LlmConfig(base_url=cfg.llm_base_url, model=cfg.llm_model, api_key=cfg.llm_api_key))
+        return cls(
+            config=LlmConfig(
+                base_url=cfg.llm_base_url,
+                model=cfg.llm_model,
+                api_key=cfg.llm_api_key,
+                timeout=cfg.llm_timeout,
+            )
+        )
 
     async def translate(self, texts: list[str]) -> dict[str, str]:
         if not self.config:
@@ -83,7 +90,7 @@ class ActivityTranslator:
         url = f"{self.config.base_url.rstrip('/')}/chat/completions"
 
         if self._session is None:
-            self._session = aiohttp.ClientSession(timeout=_TIMEOUT)
+            self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.config.timeout))
         async with self._session.post(url, json=payload, headers=headers) as response:
             response.raise_for_status()
             body = await response.json()
