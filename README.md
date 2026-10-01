@@ -97,6 +97,7 @@ scheduling, point any scheduler at that `docker run` command.
 | `HUCKLEBERRY_PASSWORD` | yes | — | Huckleberry login password |
 | `CODMON_TRANSPORT` | no | `api` | `api` (direct JSON) or `browser` (Playwright forensics) |
 | `SYNC_TEMPERATURE` | no | `true` | Whether to write reported temperatures |
+| `SYNC_DIAPER` | no | `true` | Whether to write evacuations as diaper entries (`mode=both`) |
 | `CHILD` | no | first child | Child name/kana/id to sync; shared token matched on both sides |
 | `DEDUP_WINDOW_MINUTES` | no | `15` | Skip an event if a same-type Huckleberry event exists within this window |
 | `TIMEZONE` | no | `Asia/Tokyo` | IANA timezone used for event timestamps |

@@ -22,6 +22,7 @@ class CodmonDailyContent:
     meal: str = ""
     sleepings: str = ""
     tempratures: list[dict] = field(default_factory=list)
+    evacuations: list[dict] = field(default_factory=list)
     mood_morning: str = ""
     mood_afternoon: str = ""
 
@@ -41,6 +42,7 @@ class CodmonDailyContent:
             meal=str(data.get("meal") or ""),
             sleepings=str(data.get("sleepings") or ""),
             tempratures=list(data.get("tempratures") or []),
+            evacuations=list(data.get("evacuations") or []),
             mood_morning=str(data.get("mood_morning") or ""),
             mood_afternoon=str(data.get("mood_afternoon") or ""),
         )

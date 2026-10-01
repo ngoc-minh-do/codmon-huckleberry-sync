@@ -23,6 +23,7 @@ class Config:
     data_dir: Path
     headless: bool
     sync_temperature: bool
+    sync_diaper: bool
     codmon_transport: str
     child: str | None
     dedup_window_minutes: int
@@ -81,6 +82,7 @@ def load_config(env_path: Path | None = None, *, dry_run: bool | None = None) ->
         data_dir=data_dir,
         headless=_parse_bool(os.environ.get("HEADLESS"), True),
         sync_temperature=_parse_bool(os.environ.get("SYNC_TEMPERATURE"), True),
+        sync_diaper=_parse_bool(os.environ.get("SYNC_DIAPER"), True),
         codmon_transport=os.environ.get("CODMON_TRANSPORT", "api").strip().lower(),
         child=os.environ.get("CHILD") or None,
         dedup_window_minutes=_parse_int(os.environ.get("DEDUP_WINDOW_MINUTES"), 15),

@@ -13,10 +13,18 @@ from .parser import DailySummary
 
 _LOGGER = logging.getLogger(__name__)
 
-EventKind = Literal["bottle", "sleep", "solids", "activity", "temperature"]
+EventKind = Literal["bottle", "sleep", "solids", "activity", "temperature", "diaper"]
 
 _OUTDOOR_KEYWORDS = ("散歩", "公園", "園庭", "外遊び", "戸外")
 _ACTIVITY_START = time(9, 0)
+
+_POO_CONSISTENCY = {
+    "普通": "solid",
+    "軟便": "loose",
+    "下痢便": "diarrhea",
+    "硬便": "hard",
+    "少量便": "solid",
+}
 
 
 @dataclass
@@ -27,7 +35,13 @@ class PlannedEvent:
     payload: dict
 
 
-def plan_events(summary: DailySummary, tz: ZoneInfo, *, sync_temperature: bool = True) -> list[PlannedEvent]:
+def plan_events(
+    summary: DailySummary,
+    tz: ZoneInfo,
+    *,
+    sync_temperature: bool = True,
+    sync_diaper: bool = True,
+) -> list[PlannedEvent]:
     events: list[PlannedEvent] = []
     day = summary.date
 
@@ -97,6 +111,30 @@ def plan_events(summary: DailySummary, tz: ZoneInfo, *, sync_temperature: bool =
                     start=_combine(day, measurement.time, tz),
                     end=None,
                     payload={"amount": measurement.value, "units": "C", "note": measurement.source_note},
+                )
+            )
+
+    if sync_diaper:
+        for poo in summary.poo_events:
+            if poo.time is None:
+                _LOGGER.info("Skipping evacuation without time: %r", poo.value)
+                continue
+            consistency = _POO_CONSISTENCY.get(poo.value)
+            if consistency is None:
+                _LOGGER.info("Skipping evacuation with unknown wording: %r", poo.value)
+                continue
+            events.append(
+                PlannedEvent(
+                    kind="diaper",
+                    start=_combine(day, poo.time, tz),
+                    end=None,
+                    payload={
+                        "mode": "both",
+                        "pee_amount": "medium",
+                        "poo_amount": "little" if poo.value == "少量便" else "medium",
+                        "consistency": consistency,
+                        "note": poo.value,
+                    },
                 )
             )
 

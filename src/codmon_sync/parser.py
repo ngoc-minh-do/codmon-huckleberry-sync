@@ -68,6 +68,12 @@ class TemperatureEvent:
 
 
 @dataclass
+class PooEvent:
+    time: time | None = None
+    value: str = ""
+
+
+@dataclass
 class DailySummary:
     date: date
     milk_events: list[MilkEvent] = field(default_factory=list)
@@ -75,6 +81,7 @@ class DailySummary:
     meal_events: list[MealEvent] = field(default_factory=list)
     activities: list[ActivityEvent] = field(default_factory=list)
     temperature_events: list[TemperatureEvent] = field(default_factory=list)
+    poo_events: list[PooEvent] = field(default_factory=list)
     raw_text: str = ""
 
 
@@ -170,6 +177,17 @@ def _parse_content(summary: DailySummary, content: CodmonDailyContent) -> None:
                 time=_parse_hhmm(str(measurement.get("temprature_time") or "")),
                 value=parsed,
                 source_note=str(value),
+            )
+        )
+
+    for evacuation in content.evacuations:
+        value = str(evacuation.get("evacuation") or "").strip()
+        if not value or value == "不明":
+            continue
+        summary.poo_events.append(
+            PooEvent(
+                time=_parse_hhmm(str(evacuation.get("evacuation_time") or "")),
+                value=value,
             )
         )
 

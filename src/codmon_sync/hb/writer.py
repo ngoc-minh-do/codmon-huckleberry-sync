@@ -87,6 +87,7 @@ class HuckleberryWriter:
             ("sleep", "intervals"),
             ("activities", "intervals"),
             ("health", "data"),
+            ("diaper", "intervals"),
         ]
 
         existing: list[tuple[str, float]] = []
@@ -133,6 +134,8 @@ class HuckleberryWriter:
             return f"activity:{mode}" if mode else None
         if top == "health":
             return "temperature" if mode == "temperature" else None
+        if top == "diaper":
+            return "diaper"
         return None
 
     @staticmethod
@@ -182,6 +185,15 @@ class HuckleberryWriter:
                     amount=event.payload["amount"],
                     units=event.payload.get("units", "C"),
                     notes=event.payload.get("note"),
+                )
+            elif event.kind == "diaper":
+                await api.log_diaper(
+                    child,
+                    start_time=event.start,
+                    mode=event.payload.get("mode", "both"),
+                    pee_amount=event.payload.get("pee_amount"),
+                    poo_amount=event.payload.get("poo_amount"),
+                    consistency=event.payload.get("consistency"),
                 )
             else:
                 raise ValueError(f"Unknown event kind {event.kind}")
