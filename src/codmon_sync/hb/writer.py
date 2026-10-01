@@ -169,7 +169,7 @@ class HuckleberryWriter:
             food_id = created.id
             self._custom_foods[key] = food_id
             _LOGGER.info("Registered custom food %r as %s", food_name.strip(), food_id)
-        return SolidsFoodReference(id=food_id, source="custom", name=food_name, amount=0)
+        return SolidsFoodReference(id=food_id, source="custom", name=food_name, amount=1)
 
     def _tz_offset_minutes(self) -> float:
         now = datetime.now(self.config.timezone)
