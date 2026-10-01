@@ -30,6 +30,10 @@ class Config:
     codmon_transport: str
     child: str | None
     dedup_window_minutes: int
+    translate_activity: bool
+    llm_base_url: str
+    llm_model: str
+    llm_api_key: str | None
 
     @property
     def timezone(self) -> ZoneInfo:
@@ -85,6 +89,10 @@ def load_config(env_path: Path | None = None, *, dry_run: bool | None = None) ->
     project_root = Path(__file__).resolve().parent.parent
     default_data_dir = project_root / "data"
     data_dir = Path(os.environ.get("DATA_DIR", default_data_dir)).expanduser()
+    translate_activity = _parse_bool(os.environ.get("TRANSLATE_ACTIVITY"), False)
+    llm_base_url = (os.environ.get("LLM_BASE_URL") or "").strip().rstrip("/")
+    if translate_activity and not llm_base_url:
+        raise ConfigError("TRANSLATE_ACTIVITY is true but LLM_BASE_URL is not set")
     return Config(
         codmon_email=codmon_email,
         codmon_password=codmon_password,
@@ -101,4 +109,8 @@ def load_config(env_path: Path | None = None, *, dry_run: bool | None = None) ->
         codmon_transport=os.environ.get("CODMON_TRANSPORT", "api").strip().lower(),
         child=os.environ.get("CHILD") or None,
         dedup_window_minutes=_parse_int(os.environ.get("DEDUP_WINDOW_MINUTES"), 15),
+        translate_activity=translate_activity,
+        llm_base_url=llm_base_url,
+        llm_model=os.environ.get("LLM_MODEL", "chat-default").strip(),
+        llm_api_key=os.environ.get("LLM_API_KEY") or None,
     )

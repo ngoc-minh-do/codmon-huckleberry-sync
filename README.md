@@ -26,8 +26,10 @@ Both integrations are unofficial and can break if either service changes.
    - milk → `log_bottle` (Formula / Breast Milk, ml)
    - naps → `log_sleep`
    - meals → `log_solids`
-   - activities → `log_activity` (`outdoorPlay` when 散歩/公園 appears)
-   - temperatures → `log_temperature` (disable with `SYNC_TEMPERATURE=false`)
+- activities → `log_activity` (`outdoorPlay` when 散歩/公園 appears)
+    - temperatures → `log_temperature` (disable with `SYNC_TEMPERATURE=false`)
+    - activity memos can be translated Japanese→English via a local LLM
+      (`TRANSLATE_ACTIVITY=true`, see below) — off by default
 4. **Write** — executed against Huckleberry via `huckleberry-api` unless in
    dry-run mode.
 5. **Dedupe** — before writing, the live Huckleberry history
@@ -102,6 +104,10 @@ scheduling, point any scheduler at that `docker run` command.
 | `BATH_TIME` | no | `09:30` | Default time for the water-play activity |
 | `CHILD` | no | first child | Child name/kana/id to sync; shared token matched on both sides |
 | `DEDUP_WINDOW_MINUTES` | no | `15` | Skip an event if a same-type Huckleberry event exists within this window |
+| `TRANSLATE_ACTIVITY` | no | `false` | Translate the daily memo into English via `LLM_*` before writing the activity |
+| `LLM_BASE_URL` | only with `TRANSLATE_ACTIVITY` | — | OpenAI-compatible chat-completions endpoint base URL |
+| `LLM_MODEL` | no | `chat-default` | Model name served by the endpoint |
+| `LLM_API_KEY` | no | — | Optional Bearer token for the endpoint |
 | `TIMEZONE` | no | `Asia/Tokyo` | IANA timezone used for event timestamps |
 | `DRY_RUN` | no | `true` | Plan only; do not write to Huckleberry |
 | `DATA_DIR` | no | `data` | State + introspection output directory |

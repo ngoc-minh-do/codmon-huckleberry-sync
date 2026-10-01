@@ -107,6 +107,7 @@ async def sync_day(
         sync_bath=cfg.sync_bath,
         bath_time=cfg.bath_time,
     )
+    translated = await _maybe_translate(cfg, events)
     _LOGGER.info(
         "Parsed %s: %d milk, %d sleep, %d meal, %d activity, %d temperature, %d poo -> %d Huckleberry events (dry_run=%s)",
         day,
@@ -119,6 +120,10 @@ async def sync_day(
         len(events),
         effective_dry_run,
     )
+    if translated:
+        _LOGGER.info(
+            "Translated %d of %d activity description(s) via %s", translated, len(summary.activities), cfg.llm_model
+        )
     if not events:
         _LOGGER.warning("No parseable events for %s", day)
         return 0
@@ -160,56 +165,63 @@ async def backfill(
     days = sorted(reports)
     _LOGGER.info("Backfill found %d report days in %s..%s (dry_run=%s)", len(days), start, day_end, effective_dry_run)
 
-    writer = HuckleberryWriter(cfg, dry_run=effective_dry_run)
+    translator = _new_translator(cfg)
     try:
-        await writer.connect(child=child)
-        total_written = 0
-        days_skipped = 0
-        days_failed = 0
-        for day in days:
-            if state.is_synced(day) and not force:
-                _LOGGER.info("Skip %s (already synced)", day)
-                days_skipped += 1
-                continue
-            try:
-                summary = extract_summary(reports[day])
-                events = plan_events(
-                    summary,
-                    cfg.timezone,
-                    sync_temperature=cfg.sync_temperature,
-                    sync_diaper=cfg.sync_diaper,
-                    sync_bath=cfg.sync_bath,
-                    bath_time=cfg.bath_time,
-                )
-                _LOGGER.info(
-                    "--- %s: %d milk, %d sleep, %d meal, %d activity, %d temperature, %d poo -> %d events",
-                    day,
-                    len(summary.milk_events),
-                    len(summary.sleep_events),
-                    len(summary.meal_events),
-                    len(summary.activities),
-                    len(summary.temperature_events),
-                    len(summary.poo_events),
-                    len(events),
-                )
-                if events:
-                    written = await writer.apply(events, day)
-                    total_written += written
-                    if not effective_dry_run:
-                        state.mark_synced(day, {post.post_id for post in reports[day].posts}, written)
-            except Exception:
-                days_failed += 1
-                _LOGGER.exception("Backfill failed for %s", day)
-        _LOGGER.info(
-            "Backfill complete: wrote %d events across %d days (%d skipped, %d failed)",
-            total_written,
-            len(days) - days_skipped - days_failed,
-            days_skipped,
-            days_failed,
-        )
-        return total_written
+        writer = HuckleberryWriter(cfg, dry_run=effective_dry_run)
+        try:
+            await writer.connect(child=child)
+            total_written = 0
+            days_skipped = 0
+            days_failed = 0
+            for day in days:
+                if state.is_synced(day) and not force:
+                    _LOGGER.info("Skip %s (already synced)", day)
+                    days_skipped += 1
+                    continue
+                try:
+                    summary = extract_summary(reports[day])
+                    events = plan_events(
+                        summary,
+                        cfg.timezone,
+                        sync_temperature=cfg.sync_temperature,
+                        sync_diaper=cfg.sync_diaper,
+                        sync_bath=cfg.sync_bath,
+                        bath_time=cfg.bath_time,
+                    )
+                    if translator is not None:
+                        await _translate_events(translator, events)
+                    _LOGGER.info(
+                        "--- %s: %d milk, %d sleep, %d meal, %d activity, %d temperature, %d poo -> %d events",
+                        day,
+                        len(summary.milk_events),
+                        len(summary.sleep_events),
+                        len(summary.meal_events),
+                        len(summary.activities),
+                        len(summary.temperature_events),
+                        len(summary.poo_events),
+                        len(events),
+                    )
+                    if events:
+                        written = await writer.apply(events, day)
+                        total_written += written
+                        if not effective_dry_run:
+                            state.mark_synced(day, {post.post_id for post in reports[day].posts}, written)
+                except Exception:
+                    days_failed += 1
+                    _LOGGER.exception("Backfill failed for %s", day)
+            _LOGGER.info(
+                "Backfill complete: wrote %d events across %d days (%d skipped, %d failed)",
+                total_written,
+                len(days) - days_skipped - days_failed,
+                days_skipped,
+                days_failed,
+            )
+            return total_written
+        finally:
+            await writer.close()
     finally:
-        await writer.close()
+        if translator is not None:
+            await translator.close()
 
 
 async def _fetch_report(cfg: Config, day: date, child: str | None) -> DailyReport:
@@ -227,3 +239,29 @@ async def _fetch_report(cfg: Config, day: date, child: str | None) -> DailyRepor
         return await client.fetch_daily_report(day, child=child)
     finally:
         await client.stop()
+
+
+async def _maybe_translate(cfg: Config, events: list) -> int:
+    translator = _new_translator(cfg)
+    if translator is None:
+        return 0
+    before = sum(1 for event in events if event.kind == "activity")
+    try:
+        await _translate_events(translator, events)
+    finally:
+        await translator.close()
+    return before
+
+
+def _new_translator(cfg: Config):
+    if not cfg.translate_activity:
+        return None
+    from .translate import ActivityTranslator
+
+    return ActivityTranslator.from_config(cfg)
+
+
+async def _translate_events(translator, events: list) -> None:
+    from .translate import translate_activity_descriptions
+
+    await translate_activity_descriptions(translator, events)
