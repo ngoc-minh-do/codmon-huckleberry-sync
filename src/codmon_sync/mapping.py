@@ -16,7 +16,7 @@ _LOGGER = logging.getLogger(__name__)
 EventKind = Literal["bottle", "sleep", "solids", "activity", "temperature", "diaper"]
 
 _OUTDOOR_KEYWORDS = ("散歩", "公園", "園庭", "外遊び", "戸外")
-_ACTIVITY_START = time(9, 0)
+_ACTIVITY_START = time(9, 30)
 
 _POO_CONSISTENCY = {
     "普通": "solid",
@@ -41,6 +41,8 @@ def plan_events(
     *,
     sync_temperature: bool = True,
     sync_diaper: bool = True,
+    sync_bath: bool = True,
+    bath_time: time = time(9, 30),
 ) -> list[PlannedEvent]:
     events: list[PlannedEvent] = []
     day = summary.date
@@ -137,6 +139,16 @@ def plan_events(
                     },
                 )
             )
+
+    if sync_bath and summary.bathing == "有":
+        events.append(
+            PlannedEvent(
+                kind="activity",
+                start=_combine(day, bath_time, tz),
+                end=None,
+                payload={"mode": "bath", "description": "水遊び"},
+            )
+        )
 
     return events
 

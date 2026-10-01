@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from datetime import time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -24,6 +25,8 @@ class Config:
     headless: bool
     sync_temperature: bool
     sync_diaper: bool
+    sync_bath: bool
+    bath_time: time
     codmon_transport: str
     child: str | None
     dedup_window_minutes: int
@@ -49,6 +52,16 @@ def _parse_int(value: str | None, default: int) -> int:
     try:
         return int(value)
     except ValueError:
+        return default
+
+
+def _parse_time(value: str | None, default: time) -> time:
+    if not value:
+        return default
+    try:
+        hour, minute = value.strip().split(":", 1)
+        return time(int(hour), int(minute))
+    except ValueError, AttributeError:
         return default
 
 
@@ -83,6 +96,8 @@ def load_config(env_path: Path | None = None, *, dry_run: bool | None = None) ->
         headless=_parse_bool(os.environ.get("HEADLESS"), True),
         sync_temperature=_parse_bool(os.environ.get("SYNC_TEMPERATURE"), True),
         sync_diaper=_parse_bool(os.environ.get("SYNC_DIAPER"), True),
+        sync_bath=_parse_bool(os.environ.get("SYNC_BATH"), True),
+        bath_time=_parse_time(os.environ.get("BATH_TIME"), time(9, 30)),
         codmon_transport=os.environ.get("CODMON_TRANSPORT", "api").strip().lower(),
         child=os.environ.get("CHILD") or None,
         dedup_window_minutes=_parse_int(os.environ.get("DEDUP_WINDOW_MINUTES"), 15),

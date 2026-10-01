@@ -99,7 +99,14 @@ async def sync_day(
         return 0
 
     summary = extract_summary(report)
-    events = plan_events(summary, cfg.timezone, sync_temperature=cfg.sync_temperature, sync_diaper=cfg.sync_diaper)
+    events = plan_events(
+        summary,
+        cfg.timezone,
+        sync_temperature=cfg.sync_temperature,
+        sync_diaper=cfg.sync_diaper,
+        sync_bath=cfg.sync_bath,
+        bath_time=cfg.bath_time,
+    )
     _LOGGER.info(
         "Parsed %s: %d milk, %d sleep, %d meal, %d activity, %d temperature, %d poo -> %d Huckleberry events (dry_run=%s)",
         day,
@@ -167,7 +174,12 @@ async def backfill(
             try:
                 summary = extract_summary(reports[day])
                 events = plan_events(
-                    summary, cfg.timezone, sync_temperature=cfg.sync_temperature, sync_diaper=cfg.sync_diaper
+                    summary,
+                    cfg.timezone,
+                    sync_temperature=cfg.sync_temperature,
+                    sync_diaper=cfg.sync_diaper,
+                    sync_bath=cfg.sync_bath,
+                    bath_time=cfg.bath_time,
                 )
                 _LOGGER.info(
                     "--- %s: %d milk, %d sleep, %d meal, %d activity, %d temperature, %d poo -> %d events",

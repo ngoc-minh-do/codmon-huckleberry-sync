@@ -98,6 +98,8 @@ scheduling, point any scheduler at that `docker run` command.
 | `CODMON_TRANSPORT` | no | `api` | `api` (direct JSON) or `browser` (Playwright forensics) |
 | `SYNC_TEMPERATURE` | no | `true` | Whether to write reported temperatures |
 | `SYNC_DIAPER` | no | `true` | Whether to write evacuations as diaper entries (`mode=both`) |
+| `SYNC_BATH` | no | `true` | Whether to write water-play days (沐浴`有`) as a `bath` activity |
+| `BATH_TIME` | no | `09:30` | Default time for the water-play activity |
 | `CHILD` | no | first child | Child name/kana/id to sync; shared token matched on both sides |
 | `DEDUP_WINDOW_MINUTES` | no | `15` | Skip an event if a same-type Huckleberry event exists within this window |
 | `TIMEZONE` | no | `Asia/Tokyo` | IANA timezone used for event timestamps |

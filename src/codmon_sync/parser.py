@@ -82,6 +82,7 @@ class DailySummary:
     activities: list[ActivityEvent] = field(default_factory=list)
     temperature_events: list[TemperatureEvent] = field(default_factory=list)
     poo_events: list[PooEvent] = field(default_factory=list)
+    bathing: str = ""
     raw_text: str = ""
 
 
@@ -163,6 +164,7 @@ def _parse_content(summary: DailySummary, content: CodmonDailyContent) -> None:
 
     if content.memo_text:
         summary.activities.append(ActivityEvent(description=content.memo_text))
+    summary.bathing = content.bathing
 
     for measurement in content.tempratures:
         value = measurement.get("temprature")
@@ -205,7 +207,7 @@ def _milk_time(label: str | None) -> time | None:
 _MEAL_TIMES = {
     "朝ごはん": time(9, 0),
     "朝食": time(9, 0),
-    "午前おやつ": time(10, 15),
+    "午前おやつ": time(10, 0),
     "昼食": time(11, 15),
     "給食": time(11, 15),
     "離乳食": time(11, 15),
