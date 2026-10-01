@@ -128,6 +128,74 @@ async def sync_day(
     return written
 
 
+async def backfill(
+    cfg: Config,
+    start: date,
+    end: date | None,
+    *,
+    force: bool,
+    dry_run: bool | None = None,
+    child: str | None = None,
+) -> int:
+    effective_dry_run = cfg.dry_run if dry_run is None else dry_run
+    child = child or cfg.child
+    day_end = end or date.today()
+    state = SyncState(cfg.state_path)
+
+    client = CodmonApiClient(cfg.codmon_email, cfg.codmon_password)
+    await client.start()
+    try:
+        reports = await client.fetch_reports_range(start, day_end, child=child)
+    finally:
+        await client.stop()
+
+    days = sorted(reports)
+    _LOGGER.info("Backfill found %d report days in %s..%s (dry_run=%s)", len(days), start, day_end, effective_dry_run)
+
+    writer = HuckleberryWriter(cfg, dry_run=effective_dry_run)
+    try:
+        await writer.connect(child=child)
+        total_written = 0
+        days_skipped = 0
+        days_failed = 0
+        for day in days:
+            if state.is_synced(day) and not force:
+                _LOGGER.info("Skip %s (already synced)", day)
+                days_skipped += 1
+                continue
+            try:
+                summary = extract_summary(reports[day])
+                events = plan_events(summary, cfg.timezone, sync_temperature=cfg.sync_temperature)
+                _LOGGER.info(
+                    "--- %s: %d milk, %d sleep, %d meal, %d activity, %d temperature -> %d events",
+                    day,
+                    len(summary.milk_events),
+                    len(summary.sleep_events),
+                    len(summary.meal_events),
+                    len(summary.activities),
+                    len(summary.temperature_events),
+                    len(events),
+                )
+                if events:
+                    written = await writer.apply(events, day)
+                    total_written += written
+                    if not effective_dry_run:
+                        state.mark_synced(day, {post.post_id for post in reports[day].posts}, written)
+            except Exception:
+                days_failed += 1
+                _LOGGER.exception("Backfill failed for %s", day)
+        _LOGGER.info(
+            "Backfill complete: wrote %d events across %d days (%d skipped, %d failed)",
+            total_written,
+            len(days) - days_skipped - days_failed,
+            days_skipped,
+            days_failed,
+        )
+        return total_written
+    finally:
+        await writer.close()
+
+
 async def _fetch_report(cfg: Config, day: date, child: str | None) -> DailyReport:
     if cfg.codmon_transport == "browser":
         client = CodmonClient(cfg.codmon_email, cfg.codmon_password, headless=cfg.headless)

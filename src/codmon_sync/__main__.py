@@ -54,6 +54,22 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     introspect.add_argument("--date", type=lambda value: date.fromisoformat(value), default=None)
     introspect.add_argument("--output", default=None, help="Subdirectory under DATA_DIR for artifacts")
+
+    backfill = subparsers.add_parser(
+        "backfill",
+        help="One-time sync of all daily reports from a start date through the end date (default today)",
+    )
+    backfill.add_argument(
+        "--start",
+        type=lambda value: date.fromisoformat(value),
+        default=None,
+        help="First day to backfill YYYY-MM-DD (default: ~18 months ago)",
+    )
+    backfill.add_argument("--end", type=lambda value: date.fromisoformat(value), default=None)
+    backfill.add_argument("--force", action="store_true")
+    backfill.add_argument("--dry-run", dest="dry_run", action="store_true", default=None)
+    backfill.add_argument("--no-dry-run", dest="dry_run", action="store_false")
+    backfill.add_argument("--child", default=None)
     return parser
 
 
@@ -79,6 +95,14 @@ def main(argv: list[str] | None = None) -> int:
         report = asyncio.run(introspect(cfg, args.date, args.output))
         print(f"Captured {len(report.posts)} posts; artifacts under {cfg.data_dir}")
         return 0
+
+    if command == "backfill":
+        from datetime import timedelta
+
+        from .sync import backfill
+
+        start = args.start or date.today() - timedelta(days=550)
+        return asyncio.run(backfill(cfg, start, args.end, force=args.force, dry_run=args.dry_run, child=args.child))
 
     from .sync import sync_day
 

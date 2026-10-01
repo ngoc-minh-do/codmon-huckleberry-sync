@@ -32,6 +32,8 @@ class CodmonApiClient:
         self.email = email
         self.password = password
         self._session: aiohttp.ClientSession | None = None
+        self._ready = False
+        self._service_ids: list[str] = []
 
     async def start(self) -> CodmonApiClient:
         jar = aiohttp.CookieJar()
@@ -125,26 +127,26 @@ class CodmonApiClient:
         return await self._request("GET", "/api/v2/parent/timeline/", params=params)
 
     async def fetch_daily_report(self, target: date, child: str | None = None) -> DailyReport:
-        await self.login()
-        children = await self.children()
-        service_ids = self._service_ids_for(children, child)
-        if not service_ids:
-            raise CodmonError("No nursery service found for this Codmon account")
+        await self._ensure_ready(child)
 
         posts: list[CodmonPost] = []
         network: list[dict] = []
         seen: set[str] = set()
 
-        for service_id in service_ids:
+        for service_id in self._service_ids:
             page = 1
             while True:
                 body = await self._timeline_page(target, target, service_id, page=page)
                 network.append({"service_id": service_id, "page": page})
                 for item in body.get("data", []):
-                    post = self._post_from_item(item, target)
-                    if post is not None and post.post_id not in seen:
-                        seen.add(post.post_id)
-                        posts.append(post)
+                    parsed = self._report_post(item)
+                    if parsed is None:
+                        continue
+                    day, post = parsed
+                    if day != target or post.post_id in seen:
+                        continue
+                    seen.add(post.post_id)
+                    posts.append(post)
                 next_page = body.get("next_page")
                 if not isinstance(next_page, int) or next_page <= page:
                     break
@@ -153,15 +155,70 @@ class CodmonApiClient:
 
         return DailyReport(date=target, posts=posts, network=network)
 
-    def _post_from_item(self, item: dict, target: date) -> CodmonPost | None:
+    async def fetch_reports_range(
+        self,
+        start: date,
+        end: date,
+        child: str | None = None,
+    ) -> dict[date, DailyReport]:
+        """Fetch every daily report in [start, end] as a {date: DailyReport} map.
+
+        Single paginated scan per nursery; the timeline items carry the full
+        report content, so no per-day requests are needed.
+        """
+        await self._ensure_ready(child)
+
+        grouped: dict[date, list[CodmonPost]] = {}
+        seen: set[tuple[str, str]] = set()
+
+        for service_id in self._service_ids:
+            page = 1
+            while True:
+                body = await self._timeline_page(start, end, service_id, page=page)
+                for item in body.get("data", []):
+                    parsed = self._report_post(item)
+                    if parsed is None:
+                        continue
+                    day, post = parsed
+                    if day < start or day > end:
+                        continue
+                    key = (service_id, post.post_id)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    grouped.setdefault(day, []).append(post)
+                next_page = body.get("next_page")
+                if not isinstance(next_page, int) or next_page <= page:
+                    break
+                page = next_page
+
+        reports = {day: DailyReport(date=day, posts=posts) for day, posts in grouped.items()}
+        _LOGGER.info("Scanned %s..%s: %d days with reports", start, end, len(reports))
+        return reports
+
+    async def _ensure_ready(self, child: str | None) -> None:
+        if self._ready:
+            return
+        await self.login()
+        children = await self.children()
+        self._service_ids = self._service_ids_for(children, child)
+        if not self._service_ids:
+            raise CodmonError("No nursery service found for this Codmon account")
+        self._ready = True
+
+    def _report_post(self, item: dict) -> tuple[date, CodmonPost] | None:
         if str(item.get("kind")) != "4":
             return None
-        if str(item.get("display_date", ""))[:10] != target.isoformat():
+        try:
+            day = date.fromisoformat(str(item.get("display_date", ""))[:10])
+        except ValueError:
             return None
         content = CodmonDailyContent.from_raw(item.get("content"))
         texts = [content.memo_text, content.meal, content.sleepings]
-        return CodmonPost(
+        post = CodmonPost(
             post_id=str(item.get("id", "")),
             body_text="\n".join(t for t in texts if t),
+            raw_html=str(item.get("content") or ""),
             content=content,
         )
+        return day, post
