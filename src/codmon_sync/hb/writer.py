@@ -8,7 +8,7 @@ from datetime import date, datetime, time, timedelta
 import aiohttp
 
 from ..config import Config, ConfigError
-from ..mapping import PlannedEvent, solids_reference
+from ..mapping import PlannedEvent
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -24,6 +24,7 @@ class HuckleberryWriter:
         self._session: aiohttp.ClientSession | None = None
         self._api = None
         self._child_uid: str | None = None
+        self._custom_foods: dict[str, str] | None = None
 
     async def connect(self, child: str | None = None) -> None:
         from huckleberry_api import HuckleberryAPI
@@ -150,6 +151,26 @@ class HuckleberryWriter:
             return f"activity:{event.payload.get('mode', 'indoorPlay')}"
         return event.kind
 
+    async def _custom_food_reference(self, food_name: str):
+        from huckleberry_api.models import SolidsFoodReference
+
+        if not self._api or not self._child_uid:
+            raise RuntimeError("HuckleberryWriter.connect() must be called first")
+        if self._custom_foods is None:
+            self._custom_foods = {}
+            for food in await self._api.list_solids_custom_foods(self._child_uid):
+                name = (food.name or "").strip().lower()
+                if name and food.id:
+                    self._custom_foods.setdefault(name, food.id)
+        key = food_name.strip().lower()
+        food_id = self._custom_foods.get(key)
+        if food_id is None:
+            created = await self._api.create_solids_custom_food(self._child_uid, name=food_name.strip())
+            food_id = created.id
+            self._custom_foods[key] = food_id
+            _LOGGER.info("Registered custom food %r as %s", food_name.strip(), food_id)
+        return SolidsFoodReference(id=food_id, source="custom", name=food_name, amount=0)
+
     def _tz_offset_minutes(self) -> float:
         now = datetime.now(self.config.timezone)
         offset = now.utcoffset()
@@ -229,7 +250,7 @@ class HuckleberryWriter:
                 await api.log_solids(
                     child,
                     start_time=event.start,
-                    foods=[solids_reference(name) for name in event.payload["foods"]],
+                    foods=[await self._custom_food_reference(name) for name in event.payload["foods"]],
                     notes=event.payload.get("note", ""),
                 )
             elif event.kind == "activity":
