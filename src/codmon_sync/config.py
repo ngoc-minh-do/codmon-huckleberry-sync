@@ -1,0 +1,87 @@
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+from dotenv import load_dotenv
+
+
+class ConfigError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class Config:
+    codmon_email: str
+    codmon_password: str
+    huckleberry_email: str
+    huckleberry_password: str
+    timezone_name: str
+    dry_run: bool
+    data_dir: Path
+    headless: bool
+    sync_temperature: bool
+    codmon_transport: str
+    child: str | None
+    dedup_window_minutes: int
+
+    @property
+    def timezone(self) -> ZoneInfo:
+        return ZoneInfo(self.timezone_name)
+
+    @property
+    def state_path(self) -> Path:
+        return self.data_dir / "state.json"
+
+
+def _parse_bool(value: str | None, default: bool) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _parse_int(value: str | None, default: int) -> int:
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+def load_config(env_path: Path | None = None, *, dry_run: bool | None = None) -> Config:
+    load_dotenv(env_path)
+
+    def require(name: str) -> str:
+        value = os.environ.get(name, "").strip()
+        if not value:
+            raise ConfigError(f"Missing required environment variable {name}")
+        return value
+
+    codmon_email = require("CODMON_EMAIL")
+    codmon_password = require("CODMON_PASSWORD")
+    huckleberry_email = require("HUCKLEBERRY_EMAIL")
+    huckleberry_password = require("HUCKLEBERRY_PASSWORD")
+
+    if dry_run is None:
+        dry_run = _parse_bool(os.environ.get("DRY_RUN"), True)
+
+    project_root = Path(__file__).resolve().parent.parent
+    default_data_dir = project_root / "data"
+    data_dir = Path(os.environ.get("DATA_DIR", default_data_dir)).expanduser()
+    return Config(
+        codmon_email=codmon_email,
+        codmon_password=codmon_password,
+        huckleberry_email=huckleberry_email,
+        huckleberry_password=huckleberry_password,
+        timezone_name=os.environ.get("TIMEZONE", "Asia/Tokyo"),
+        dry_run=dry_run,
+        data_dir=data_dir,
+        headless=_parse_bool(os.environ.get("HEADLESS"), True),
+        sync_temperature=_parse_bool(os.environ.get("SYNC_TEMPERATURE"), True),
+        codmon_transport=os.environ.get("CODMON_TRANSPORT", "api").strip().lower(),
+        child=os.environ.get("CHILD") or None,
+        dedup_window_minutes=_parse_int(os.environ.get("DEDUP_WINDOW_MINUTES"), 15),
+    )

@@ -1,0 +1,113 @@
+# codmon-huckleberry-sync
+
+Syncs the nursery's daily report (milk, meals, naps, activities) from
+[Codmon](https://parents.codmon.com/) into the [Huckleberry](https://huckleberry.com/) baby tracking app.
+
+Codmon exposes no public parent API, but its parent web app is a SPA that
+talks to an internal JSON API (`ps-api.codmon.com`) using session cookies from a
+plain email/password `POST /login`. This project uses that API directly with
+`aiohttp` — **no browser required** (a Playwright fallback scraper still exists
+for forensics via `CODMON_TRANSPORT=browser`). Huckleberry has no official API
+either — writes go through the reverse-engineered
+[`huckleberry-api`](https://github.com/Woyken/py-huckleberry-api) library
+(Firebase Firestore, the same transport the Huckleberry app uses).
+
+Both integrations are unofficial and can break if either service changes.
+
+## How it works
+
+1. **Fetch** — log in to `ps-api.codmon.com` (`POST /api/v2/parent/login`),
+   resolve the nursery `service_id` from `/children`, then pull the day's
+   連絡帳 (daily report) posts from `/timeline`.
+2. **Parse** — the report body is structured JSON: `meal` (e.g.
+   `給食：完食 おかわり ミルク160cc`), `sleepings` (e.g. `12:25~14:15`),
+   `memo` (HTML activity text), `tempratures`.
+3. **Map** — events are translated into Huckleberry operations:
+   - milk → `log_bottle` (Formula / Breast Milk, ml)
+   - naps → `log_sleep`
+   - meals → `log_solids`
+   - activities → `log_activity` (`outdoorPlay` when 散歩/公園 appears)
+   - temperatures → `log_temperature` (disable with `SYNC_TEMPERATURE=false`)
+4. **Write** — executed against Huckleberry via `huckleberry-api` unless in
+   dry-run mode.
+5. **Dedupe** — before writing, the live Huckleberry history
+   (`feed`/`sleep`/`activities`/`health` interval subcollections) is checked;
+   an event is skipped when a same-type event already exists within
+   `DEDUP_WINDOW_MINUTES` (default 15) of its planned time. This keeps syncs
+   idempotent even if `state.json` is lost or a previous run failed partway —
+   and makes `--force` replay safe.
+6. **State** — `data/state.json` records which dates were already synced so the
+   daily run skips cleanly.
+
+## Local setup
+
+Requires [uv](https://docs.astral.sh/uv/) and Python ≥ 3.14.
+
+```bash
+uv sync
+cp .env.example .env
+# fill in your credentials
+```
+
+### Check what would be synced (dry run)
+
+```bash
+uv run codmon-sync sync --date 2026-10-01        # dry run by default (DRY_RUN=true)
+uv run codmon-sync sync --date 2026-10-01 --no-dry-run
+uv run codmon-sync sync --date 2026-10-01 --force --no-dry-run   # re-sync a day
+```
+
+Without `--date`, today is used (in `TIMEZONE`, default `Asia/Tokyo`).
+
+### Introspection (when your nursery's report layout differs)
+
+`codmon-sync introspect` shows the full parsed report body (`api_report.txt`);
+with `CODMON_TRANSPORT=browser` it dumps the rendered pages, screenshots and the
+raw API traffic for forensics.
+
+## Docker
+
+Prefer not to manage a Python virtualenv? Run it as a container:
+
+```bash
+docker build -t codmon-huckleberry-sync:latest .
+```
+
+The image runs the same `sync` command by default. Mount a directory for
+`DATA_DIR` so `data/state.json` persists between runs:
+
+```bash
+docker run --rm \
+  --env-file .env \
+  -v codmon-sync-data:/data \
+  -e DATA_DIR=/data \
+  codmon-huckleberry-sync:latest sync
+```
+
+Set `DRY_RUN=false` (env or `-e`) once you want real writes. For periodic
+scheduling, point any scheduler at that `docker run` command.
+
+## Environment variables
+
+| Variable | Required | Default | Meaning |
+| --- | --- | --- | --- |
+| `CODMON_EMAIL` | yes | — | Codmon parent login email |
+| `CODMON_PASSWORD` | yes | — | Codmon parent login password |
+| `HUCKLEBERRY_EMAIL` | yes | — | Huckleberry login email |
+| `HUCKLEBERRY_PASSWORD` | yes | — | Huckleberry login password |
+| `CODMON_TRANSPORT` | no | `api` | `api` (direct JSON) or `browser` (Playwright forensics) |
+| `SYNC_TEMPERATURE` | no | `true` | Whether to write reported temperatures |
+| `CHILD` | no | first child | Child name/kana/id to sync; shared token matched on both sides |
+| `DEDUP_WINDOW_MINUTES` | no | `15` | Skip an event if a same-type Huckleberry event exists within this window |
+| `TIMEZONE` | no | `Asia/Tokyo` | IANA timezone used for event timestamps |
+| `DRY_RUN` | no | `true` | Plan only; do not write to Huckleberry |
+| `DATA_DIR` | no | `data` | State + introspection output directory |
+| `HEADLESS` | no | `true` | Run headless Chromium |
+
+## Disclaimer / risk
+
+- Uses your own account credentials to read Codmon and write Huckleberry; both
+  are reverse-engineered, non-official integrations. Use at your own risk.
+- Huckleberry writes create permanent entries. Start with dry-run mode and
+  verify planned events before enabling real sync.
+- Credentials are read from the environment; keep `.env` out of version control.
