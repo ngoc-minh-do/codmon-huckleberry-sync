@@ -41,10 +41,6 @@ class Config:
     def timezone(self) -> ZoneInfo:
         return ZoneInfo(self.timezone_name)
 
-    @property
-    def state_path(self) -> Path:
-        return self.data_dir / "state.json"
-
 
 def _parse_bool(value: str | None, default: bool) -> bool:
     if value is None:

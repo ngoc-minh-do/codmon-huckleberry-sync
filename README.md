@@ -35,11 +35,9 @@ Both integrations are unofficial and can break if either service changes.
 5. **Dedupe** — before writing, the live Huckleberry history
    (`feed`/`sleep`/`activities`/`health` interval subcollections) is checked;
    an event is skipped when a same-type event already exists within
-   `DEDUP_WINDOW_MINUTES` (default 15) of its planned time. This keeps syncs
-   idempotent even if `state.json` is lost or a previous run failed partway —
-   and makes `--force` replay safe.
-6. **State** — `data/state.json` records which dates were already synced so the
-   daily run skips cleanly.
+   `DEDUP_WINDOW_MINUTES` (default 15) of its planned time. Every run re-reads
+   the report and relies on this live check, so syncs stay idempotent even if
+   a previous run failed partway.
 
 ## Local setup
 
@@ -56,7 +54,6 @@ cp .env.example .env
 ```bash
 uv run codmon-sync sync --date 2026-10-01        # dry run by default (DRY_RUN=true)
 uv run codmon-sync sync --date 2026-10-01 --no-dry-run
-uv run codmon-sync sync --date 2026-10-01 --force --no-dry-run   # re-sync a day
 ```
 
 Without `--date`, today is used (in `TIMEZONE`, default `Asia/Tokyo`).
@@ -75,14 +72,12 @@ Prefer not to manage a Python virtualenv? Run it as a container:
 docker build -t codmon-huckleberry-sync:latest .
 ```
 
-The image runs the same `sync` command by default. Mount a directory for
-`DATA_DIR` so `data/state.json` persists between runs:
+The image runs the same `sync` command by default. `DATA_DIR` only holds
+introspection artifacts, so it can be left unset or mounted anywhere:
 
 ```bash
 docker run --rm \
   --env-file .env \
-  -v codmon-sync-data:/data \
-  -e DATA_DIR=/data \
   codmon-huckleberry-sync:latest sync
 ```
 
@@ -112,7 +107,7 @@ scheduling, point any scheduler at that `docker run` command.
 | `APPRISE_URL` | no | — | Apprise webhook; posts a success/failure notification after each real sync |
 | `TIMEZONE` | no | `Asia/Tokyo` | IANA timezone used for event timestamps |
 | `DRY_RUN` | no | `true` | Plan only; do not write to Huckleberry |
-| `DATA_DIR` | no | `data` | State + introspection output directory |
+| `DATA_DIR` | no | `data` | Introspection output directory |
 | `HEADLESS` | no | `true` | Run headless Chromium |
 
 ## Disclaimer / risk
