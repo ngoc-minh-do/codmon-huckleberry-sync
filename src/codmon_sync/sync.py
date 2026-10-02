@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
+from dataclasses import dataclass, field
 from datetime import date
 
 from .codmon.api import CodmonApiClient
@@ -15,6 +17,38 @@ from .state import SyncState
 _LOGGER = logging.getLogger(__name__)
 
 WINDOW_DAYS_BEFORE = 7
+
+
+@dataclass
+class SyncResult:
+    day: date
+    dry_run: bool
+    state: str = "synced"
+    posts: int = 0
+    milk: int = 0
+    sleep: int = 0
+    meal: int = 0
+    activity: int = 0
+    temperature: int = 0
+    poo: int = 0
+    planned: int = 0
+    translated: int = 0
+    written: int = 0
+    written_by_kind: dict[str, int] = field(default_factory=dict)
+    skipped_by_kind: dict[str, int] = field(default_factory=dict)
+    events: list = field(default_factory=list)
+
+
+@dataclass
+class BackfillResult:
+    start: date
+    end: date
+    dry_run: bool
+    days: int = 0
+    days_skipped: int = 0
+    days_failed: int = 0
+    written: int = 0
+    written_by_kind: dict[str, int] = field(default_factory=dict)
 
 
 async def introspect(cfg: Config, target: date | None, output: str | None) -> DailyReport:
@@ -81,7 +115,7 @@ async def sync_day(
     force: bool,
     dry_run: bool | None = None,
     child: str | None = None,
-) -> int:
+) -> SyncResult:
     effective_dry_run = cfg.dry_run if dry_run is None else dry_run
     child = child or cfg.child
     day = target or date.today()
@@ -91,12 +125,12 @@ async def sync_day(
         _LOGGER.info(
             "Day %s already synced (%s events) - skipping. Use --force to re-sync.", day, state.synced_event_count(day)
         )
-        return 0
+        return SyncResult(day=day, dry_run=effective_dry_run, state="already-synced")
 
     report = await _fetch_report(cfg, day, child)
     if not report.posts:
         _LOGGER.warning("No Codmon daily report posts found for %s", day)
-        return 0
+        return SyncResult(day=day, dry_run=effective_dry_run, state="no-posts")
 
     summary = extract_summary(report)
     events = plan_events(
@@ -108,16 +142,31 @@ async def sync_day(
         bath_time=cfg.bath_time,
     )
     translated = await _maybe_translate(cfg, events)
+    result = SyncResult(
+        day=day,
+        dry_run=effective_dry_run,
+        state="parsed",
+        posts=len(report.posts),
+        milk=len(summary.milk_events),
+        sleep=len(summary.sleep_events),
+        meal=len(summary.meal_events),
+        activity=len(summary.activities),
+        temperature=len(summary.temperature_events),
+        poo=len(summary.poo_events),
+        planned=len(events),
+        translated=translated,
+        events=events,
+    )
     _LOGGER.info(
         "Parsed %s: %d milk, %d sleep, %d meal, %d activity, %d temperature, %d poo -> %d Huckleberry events (dry_run=%s)",
         day,
-        len(summary.milk_events),
-        len(summary.sleep_events),
-        len(summary.meal_events),
-        len(summary.activities),
-        len(summary.temperature_events),
-        len(summary.poo_events),
-        len(events),
+        result.milk,
+        result.sleep,
+        result.meal,
+        result.activity,
+        result.temperature,
+        result.poo,
+        result.planned,
         effective_dry_run,
     )
     if translated:
@@ -126,19 +175,24 @@ async def sync_day(
         )
     if not events:
         _LOGGER.warning("No parseable events for %s", day)
-        return 0
+        result.state = "no-events"
+        return result
 
     writer = HuckleberryWriter(cfg, dry_run=effective_dry_run)
     try:
         await writer.connect(child=child)
-        written = await writer.apply(events, day)
+        applied = await writer.apply(events, day)
     finally:
         await writer.close()
 
+    result.written = applied.written
+    result.written_by_kind = applied.written_by_kind
+    result.skipped_by_kind = applied.skipped_by_kind
+
     if not effective_dry_run:
-        state.mark_synced(day, {post.post_id for post in report.posts}, written)
+        state.mark_synced(day, {post.post_id for post in report.posts}, applied.written)
         _LOGGER.info("Marked %s as synced", day)
-    return written
+    return result
 
 
 async def backfill(
@@ -149,7 +203,7 @@ async def backfill(
     force: bool,
     dry_run: bool | None = None,
     child: str | None = None,
-) -> int:
+) -> BackfillResult:
     effective_dry_run = cfg.dry_run if dry_run is None else dry_run
     child = child or cfg.child
     day_end = end or date.today()
@@ -165,6 +219,8 @@ async def backfill(
     days = sorted(reports)
     _LOGGER.info("Backfill found %d report days in %s..%s (dry_run=%s)", len(days), start, day_end, effective_dry_run)
 
+    result = BackfillResult(start=start, end=day_end, dry_run=effective_dry_run, days=len(days))
+
     translator = _new_translator(cfg)
     try:
         writer = HuckleberryWriter(cfg, dry_run=effective_dry_run)
@@ -173,6 +229,7 @@ async def backfill(
             total_written = 0
             days_skipped = 0
             days_failed = 0
+            written_by_kind: dict[str, int] = defaultdict(int)
             for day in days:
                 if state.is_synced(day) and not force:
                     _LOGGER.info("Skip %s (already synced)", day)
@@ -202,13 +259,19 @@ async def backfill(
                         len(events),
                     )
                     if events:
-                        written = await writer.apply(events, day)
-                        total_written += written
+                        applied = await writer.apply(events, day)
+                        total_written += applied.written
+                        for kind, count in applied.written_by_kind.items():
+                            written_by_kind[kind] += count
                         if not effective_dry_run:
-                            state.mark_synced(day, {post.post_id for post in reports[day].posts}, written)
+                            state.mark_synced(day, {post.post_id for post in reports[day].posts}, applied.written)
                 except Exception:
                     days_failed += 1
                     _LOGGER.exception("Backfill failed for %s", day)
+            result.days_skipped = days_skipped
+            result.days_failed = days_failed
+            result.written = total_written
+            result.written_by_kind = dict(written_by_kind)
             _LOGGER.info(
                 "Backfill complete: wrote %d events across %d days (%d skipped, %d failed)",
                 total_written,
@@ -216,7 +279,7 @@ async def backfill(
                 days_skipped,
                 days_failed,
             )
-            return total_written
+            return result
         finally:
             await writer.close()
     finally:

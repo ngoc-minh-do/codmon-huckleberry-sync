@@ -109,6 +109,7 @@ scheduling, point any scheduler at that `docker run` command.
 | `LLM_MODEL` | no | `chat-default` | Model name served by the endpoint |
 | `LLM_API_KEY` | no | — | Optional Bearer token for the endpoint |
 | `LLM_TIMEOUT` | no | `180` | Max seconds to wait for a translation response |
+| `APPRISE_URL` | no | — | Apprise webhook; posts a success/failure notification after each real sync |
 | `TIMEZONE` | no | `Asia/Tokyo` | IANA timezone used for event timestamps |
 | `DRY_RUN` | no | `true` | Plan only; do not write to Huckleberry |
 | `DATA_DIR` | no | `data` | State + introspection output directory |

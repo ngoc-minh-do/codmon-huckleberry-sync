@@ -4,8 +4,12 @@ import argparse
 import asyncio
 import logging
 from datetime import date
+from typing import TYPE_CHECKING
 
 from .config import ConfigError, load_config
+
+if TYPE_CHECKING:
+    from .sync import BackfillResult, SyncResult
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -96,17 +100,98 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Captured {len(report.posts)} posts; artifacts under {cfg.data_dir}")
         return 0
 
-    if command == "backfill":
-        from datetime import timedelta
+    return asyncio.run(_run_sync_with_notify(cfg, args, command, target))
 
-        from .sync import backfill
 
-        start = args.start or date.today() - timedelta(days=550)
-        return asyncio.run(backfill(cfg, start, args.end, force=args.force, dry_run=args.dry_run, child=args.child))
+_KIND_ORDER = {"bottle": 0, "sleep": 1, "solids": 2, "activity": 3, "temperature": 4, "diaper": 5}
 
-    from .sync import sync_day
 
-    return asyncio.run(sync_day(cfg, target, force=args.force, dry_run=args.dry_run, child=args.child))
+async def _run_sync_with_notify(cfg, args, command: str, target: date) -> int:
+    from .notify import ERROR_TITLE, OK_TITLE, AppriseNotifier
+
+    notifier = AppriseNotifier(cfg.apprise_url)
+    try:
+        if command == "backfill":
+            from datetime import timedelta
+
+            from .sync import backfill
+
+            start = args.start or date.today() - timedelta(days=550)
+            result = await backfill(cfg, start, args.end, force=args.force, dry_run=args.dry_run, child=args.child)
+            title, body = OK_TITLE, _format_backfill(cfg, result)
+        else:
+            from .sync import sync_day
+
+            result = await sync_day(cfg, target, force=args.force, dry_run=args.dry_run, child=args.child)
+            title, body = OK_TITLE, _format_sync(cfg, result)
+        if cfg.dry_run:
+            return 0
+        await notifier.send(title=title, body=body, message_type="success")
+        return 0
+    except Exception as exc:
+        if not cfg.dry_run:
+            await notifier.send(title=ERROR_TITLE, body=f"{type(exc).__name__}: {exc}", message_type="failure")
+        raise
+
+
+def _format_sync(cfg, result: SyncResult) -> str:
+    lines = [f"{result.day}  (state={result.state})"]
+    if result.state not in ("parsed", "no-events"):
+        lines.append(f"posts={result.posts}")
+        if result.written:
+            lines.append(f"written={result.written}")
+        return "\n".join(lines)
+
+    lines.append(
+        f"milk={result.milk} sleep={result.sleep} meal={result.meal} "
+        f"activity={result.activity} temp={result.temperature} poo={result.poo}"
+    )
+    if result.translated:
+        lines.append(f"memos translated: {result.translated}/{result.activity}")
+    if result.state == "no-events":
+        return "\n".join(lines)
+    for event in sorted(result.events, key=lambda e: (e.start, _KIND_ORDER.get(e.kind, 99))):
+        when = event.start.astimezone(cfg.timezone).strftime("%H:%M")
+        lines.append(f"  {when} {event.kind} {_event_summary(event)}")
+    if result.skipped_by_kind:
+        skipped = ", ".join(f"{kind}={count}" for kind, count in sorted(result.skipped_by_kind.items()))
+        lines.append(f"skipped (already synced): {skipped}")
+    lines.append(f"planned={result.planned} written={result.written}")
+    return "\n".join(lines)
+
+
+def _format_backfill(cfg, result: BackfillResult) -> str:
+    lines = [
+        f"range {result.start}..{result.end}",
+        f"days={result.days} skipped={result.days_skipped} failed={result.days_failed}",
+    ]
+    if result.written_by_kind:
+        breakdown = ", ".join(f"{kind}={count}" for kind, count in sorted(result.written_by_kind.items()))
+        lines.append(f"written={result.written}  [{breakdown}]")
+    else:
+        lines.append(f"written={result.written}")
+    return "\n".join(lines)
+
+
+def _event_summary(event) -> str:
+    payload = event.payload or {}
+    mode = payload.get("mode")
+    if event.kind == "bottle":
+        return f"{payload.get('amount_ml')}ml {payload.get('bottle_type', '')}".strip()
+    if event.kind == "sleep":
+        return f"~{event.end.strftime('%H:%M')}" if event.end else ""
+    if event.kind == "solids":
+        foods = payload.get("foods", [])
+        return ", ".join(str(food) for food in foods[:2]) + (" …" if len(foods) > 2 else "")
+    if event.kind == "activity":
+        description = str(payload.get("description", ""))
+        mode_label = mode or "indoorPlay"
+        return f"{mode_label}: {description[:60]}" + ("…" if len(description) > 60 else "")
+    if event.kind == "temperature":
+        return f"{payload.get('amount')}{payload.get('units')}"
+    if event.kind == "diaper":
+        return f"{payload.get('mode')} {payload.get('consistency', '')}".strip()
+    return str(mode or "")
 
 
 if __name__ == "__main__":

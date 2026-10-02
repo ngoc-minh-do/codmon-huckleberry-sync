@@ -35,6 +35,7 @@ class Config:
     llm_model: str
     llm_api_key: str | None
     llm_timeout: int
+    apprise_url: str | None
 
     @property
     def timezone(self) -> ZoneInfo:
@@ -116,4 +117,5 @@ def load_config(env_path: Path | None = None, *, dry_run: bool | None = None) ->
         llm_model=os.environ.get("LLM_MODEL", "chat-default").strip(),
         llm_api_key=os.environ.get("LLM_API_KEY") or None,
         llm_timeout=llm_timeout,
+        apprise_url=(os.environ.get("APPRISE_URL") or "").strip() or None,
     )

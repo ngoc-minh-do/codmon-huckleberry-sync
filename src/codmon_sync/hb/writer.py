@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 import time as _time
 import uuid
+from collections import defaultdict
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 
 import aiohttp
@@ -11,6 +13,13 @@ from ..config import Config, ConfigError
 from ..mapping import PlannedEvent
 
 _LOGGER = logging.getLogger(__name__)
+
+
+@dataclass
+class ApplyResult:
+    written: int
+    written_by_kind: dict[str, int]
+    skipped_by_kind: dict[str, int]
 
 
 def _without_none(payload: dict) -> dict:
@@ -55,12 +64,14 @@ class HuckleberryWriter:
                 return ref.cid
         raise ConfigError(f"No Huckleberry child matches {child!r}")
 
-    async def apply(self, events: list[PlannedEvent], day: date) -> int:
+    async def apply(self, events: list[PlannedEvent], day: date) -> ApplyResult:
         if not self._api or not self._child_uid:
             raise RuntimeError("HuckleberryWriter.connect() must be called before apply()")
         existing = await self._collect_existing(day)
         window_seconds = self.config.dedup_window_minutes * 60
         written = 0
+        written_by_kind: dict[str, int] = defaultdict(int)
+        skipped_by_kind: dict[str, int] = defaultdict(int)
         for event in events:
             kind_key = self._kind_key(event)
             start_label = event.start.astimezone(self.config.timezone).strftime("%Y-%m-%d %H:%M")
@@ -72,12 +83,16 @@ class HuckleberryWriter:
             if duplicates:
                 dup_time = datetime.fromtimestamp(min(duplicates), tz=self.config.timezone).strftime("%Y-%m-%d %H:%M")
                 _LOGGER.info("SKIP %s at %s (already in Huckleberry at %s)", event.kind, start_label, dup_time)
+                skipped_by_kind[event.kind] += 1
                 continue
             _LOGGER.info("PLAN %s at %s %s", event.kind, start_label, event.payload)
             if not self.dry_run:
                 await self._dispatch(event)
                 written += 1
-        return written
+                written_by_kind[event.kind] += 1
+        return ApplyResult(
+            written=written, written_by_kind=dict(written_by_kind), skipped_by_kind=dict(skipped_by_kind)
+        )
 
     async def _collect_existing(self, day: date) -> list[tuple[str, float]]:
         if not self._api or not self._child_uid:
