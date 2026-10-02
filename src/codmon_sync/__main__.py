@@ -186,7 +186,7 @@ def _event_summary(event) -> str:
     if event.kind == "activity":
         description = str(payload.get("description", ""))
         mode_label = mode or "indoorPlay"
-        return f"{mode_label}: {description[:60]}" + ("…" if len(description) > 60 else "")
+        return f"{mode_label}: {description}"
     if event.kind == "temperature":
         return f"{payload.get('amount')}{payload.get('units')}"
     if event.kind == "diaper":
