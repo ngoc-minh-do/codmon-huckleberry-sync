@@ -152,10 +152,10 @@ def _format_sync(cfg, result: SyncResult) -> str:
         return "\n".join(lines)
     for event in sorted(result.events, key=lambda e: (e.start, _KIND_ORDER.get(e.kind, 99))):
         when = event.start.astimezone(cfg.timezone).strftime("%H:%M")
-        lines.append(f"  {when} {event.kind} {_event_summary(event)}")
+        lines.append(f"- {when} {event.kind} {_event_summary(event)}")
     if result.skipped_by_kind:
         skipped = ", ".join(f"{kind}={count}" for kind, count in sorted(result.skipped_by_kind.items()))
-        lines.append(f"skipped (already synced): {skipped}")
+        lines.append(f"\nskipped (already synced): {skipped}")
     lines.append(f"planned={result.planned} written={result.written}")
     return "\n".join(lines)
 
