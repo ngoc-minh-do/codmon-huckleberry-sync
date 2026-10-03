@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date, time
 
@@ -112,6 +113,38 @@ def _meal_note_from_line(line: str, label: str) -> str:
     return note
 
 
+def _fix_duplicate_snack_labels(
+    parsed_lines: list[tuple[str, str | None, list[float]]],
+) -> list[tuple[str, str | None, list[float]]]:
+    """Correct nursery typos where a snack is labeled twice and its sibling is missing.
+
+    The report lists meals in chronological order, so e.g. two 午後おやつ lines with
+    no 午前おやつ means the first is really the morning snack.
+    """
+    labels = [label for _, label, _ in parsed_lines if label]
+    counts = Counter(labels)
+    reassign_first_to_morning = counts.get("午後おやつ", 0) >= 2 and counts.get("午前おやつ", 0) == 0
+    reassign_last_to_afternoon = counts.get("午前おやつ", 0) >= 2 and counts.get("午後おやつ", 0) == 0
+    if not (reassign_first_to_morning or reassign_last_to_afternoon):
+        return parsed_lines
+    fixed = list(parsed_lines)
+    if reassign_first_to_morning:
+        for index, (line, label, amounts) in enumerate(fixed):
+            if label == "午後おやつ":
+                fixed[index] = (line, "午前おやつ", amounts)
+                break
+    if reassign_last_to_afternoon:
+        for index in range(len(fixed) - 1, -1, -1):
+            line, label, amounts = fixed[index]
+            if label == "午前おやつ":
+                fixed[index] = (line, "午後おやつ", amounts)
+                break
+    _LOGGER.info(
+        "Corrected mislabeled duplicate snack labels: %s -> %s", labels, [label for _, label, _ in fixed if label]
+    )
+    return fixed
+
+
 def extract_summary(report: DailyReport) -> DailySummary:
     summary = DailySummary(date=report.date)
     for post in report.posts:
@@ -125,13 +158,18 @@ def extract_summary(report: DailyReport) -> DailySummary:
 
 def _parse_content(summary: DailySummary, content: CodmonDailyContent) -> None:
     numbers_normalized = _normalize_width(content.meal)
+    parsed_lines: list[tuple[str, str | None, list[float]]] = []
     for raw_line in numbers_normalized.splitlines():
         line = raw_line.strip()
         if not line:
             continue
         amounts = [float(amount) for amount in re.findall(_AMOUNT_RE, line)]
-        label = _meal_label(line)
+        parsed_lines.append((line, _meal_label(line), amounts))
+    parsed_lines = _fix_duplicate_snack_labels(parsed_lines)
+
+    for line, label, amounts in parsed_lines:
         line_time = _parse_hhmm(line)
+        original_label = _meal_label(line)
 
         for amount in amounts:
             summary.milk_events.append(
@@ -148,7 +186,7 @@ def _parse_content(summary: DailySummary, content: CodmonDailyContent) -> None:
                     label=label,
                     foods=[label],
                     time=line_time or _meal_time(label),
-                    note=_meal_note_from_line(line, label),
+                    note=_meal_note_from_line(line, original_label or label),
                 )
             )
         elif amounts and not _meal_time(label):
