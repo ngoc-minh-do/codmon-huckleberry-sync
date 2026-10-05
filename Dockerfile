@@ -9,7 +9,6 @@ COPY pyproject.toml ./
 COPY src ./src
 RUN pip install --no-cache-dir .
 
-VOLUME ["/data"]
 ENV DATA_DIR=/data
 
 ENTRYPOINT ["python", "-m", "codmon_sync"]
