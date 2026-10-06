@@ -116,15 +116,19 @@ async def _run_sync_with_notify(cfg, args, command: str, target: date) -> int:
             start = args.start or date.today() - timedelta(days=550)
             result = await backfill(cfg, start, args.end, dry_run=args.dry_run, child=args.child)
             title, body = OK_TITLE, _format_backfill(cfg, result)
+            code = 1 if result.days_failed else 0
         else:
             from .sync import sync_day
 
             result = await sync_day(cfg, target, dry_run=args.dry_run, child=args.child)
             title, body = OK_TITLE, _format_sync(cfg, result)
+            code = 0
+        print(_result_json(command, result))
         if cfg.dry_run:
             return 0
-        await notifier.send(title=title, body=body, message_type="success")
-        return 0
+        if not code:
+            await notifier.send(title=title, body=body, message_type="success")
+        return code
     except Exception as exc:
         if not cfg.dry_run:
             await notifier.send(title=ERROR_TITLE, body=f"{type(exc).__name__}: {exc}", message_type="failure")
@@ -183,6 +187,45 @@ def _event_summary(event) -> str:
     if event.kind == "diaper":
         return f"{payload.get('mode')} {payload.get('consistency', '')}".strip()
     return str(mode or "")
+
+
+def _result_json(command: str, result) -> str:
+    import json
+
+    if command == "backfill":
+        payload = {
+            "complete": 1,
+            "code": 1 if result.days_failed else 0,
+            "command": command,
+            "start": result.start.isoformat(),
+            "end": result.end.isoformat(),
+            "dryRun": result.dry_run,
+            "days": result.days,
+            "daysFailed": result.days_failed,
+            "written": result.written,
+            "writtenByKind": dict(result.written_by_kind),
+        }
+    else:
+        payload = {
+            "complete": 1,
+            "code": 0,
+            "command": command,
+            "day": result.day.isoformat(),
+            "dryRun": result.dry_run,
+            "posts": result.posts,
+            "milk": result.milk,
+            "sleep": result.sleep,
+            "meal": result.meal,
+            "activity": result.activity,
+            "temperature": result.temperature,
+            "poo": result.poo,
+            "planned": result.planned,
+            "translated": result.translated,
+            "written": result.written,
+            "writtenByKind": dict(result.written_by_kind),
+            "skippedByKind": dict(result.skipped_by_kind),
+        }
+    return json.dumps(payload)
 
 
 if __name__ == "__main__":
