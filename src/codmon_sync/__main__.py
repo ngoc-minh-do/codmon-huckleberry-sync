@@ -87,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as exc:
         parser.error(str(exc))
 
-    target = args.date or date.today()
+    target = args.date or cfg.today()
     command = args.command or "sync"
 
     if command == "introspect":
@@ -113,7 +113,7 @@ async def _run_sync_with_notify(cfg, args, command: str, target: date) -> int:
 
             from .sync import backfill
 
-            start = args.start or date.today() - timedelta(days=550)
+            start = args.start or cfg.today() - timedelta(days=550)
             result = await backfill(cfg, start, args.end, dry_run=args.dry_run, child=args.child)
             title, body = OK_TITLE, _format_backfill(cfg, result)
             code = 1 if result.days_failed else 0

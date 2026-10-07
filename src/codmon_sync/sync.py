@@ -57,7 +57,7 @@ async def introspect(cfg: Config, target: date | None, output: str | None) -> Da
 async def _introspect_api(cfg: Config, target: date | None, output: str | None) -> DailyReport:
     output_dir = cfg.data_dir / (output or "introspect")
     output_dir.mkdir(parents=True, exist_ok=True)
-    day = target or date.today()
+    day = target or cfg.today()
     client = CodmonApiClient(cfg.codmon_email, cfg.codmon_password)
     await client.start()
     try:
@@ -93,12 +93,13 @@ async def _introspect_browser(cfg: Config, target: date | None, output: str | No
     client = CodmonClient(
         cfg.codmon_email,
         cfg.codmon_password,
+        timezone=cfg.timezone_name,
         headless=cfg.headless,
         record_har_path=str(output_dir / "network.har"),
     )
     await client.start()
     try:
-        report = await client.introspect(output_dir, target=target)
+        report = await client.introspect(output_dir, target=target or cfg.today())
     finally:
         await client.stop()
     _LOGGER.info("Introspection complete: %s artifacts written to %s", len(report.posts), output_dir)
@@ -114,7 +115,7 @@ async def sync_day(
 ) -> SyncResult:
     effective_dry_run = cfg.dry_run if dry_run is None else dry_run
     child = child or cfg.child
-    day = target or date.today()
+    day = target or cfg.today()
 
     report = await _fetch_report(cfg, day, child)
     if not report.posts:
@@ -188,7 +189,7 @@ async def backfill(
 ) -> BackfillResult:
     effective_dry_run = cfg.dry_run if dry_run is None else dry_run
     child = child or cfg.child
-    day_end = end or date.today()
+    day_end = end or cfg.today()
 
     client = CodmonApiClient(cfg.codmon_email, cfg.codmon_password)
     await client.start()
@@ -261,7 +262,7 @@ async def backfill(
 
 async def _fetch_report(cfg: Config, day: date, child: str | None) -> DailyReport:
     if cfg.codmon_transport == "browser":
-        client = CodmonClient(cfg.codmon_email, cfg.codmon_password, headless=cfg.headless)
+        client = CodmonClient(cfg.codmon_email, cfg.codmon_password, timezone=cfg.timezone_name, headless=cfg.headless)
         await client.start()
         try:
             return await client.fetch_daily_report(day)

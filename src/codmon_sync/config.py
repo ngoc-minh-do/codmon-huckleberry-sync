@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from datetime import time
+from datetime import date, datetime, time
 from pathlib import Path
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import load_dotenv
 
 
 class ConfigError(RuntimeError):
     pass
+
+
+_DEFAULT_TIMEZONE = "Asia/Tokyo"
 
 
 @dataclass(frozen=True)
@@ -40,6 +43,25 @@ class Config:
     @property
     def timezone(self) -> ZoneInfo:
         return ZoneInfo(self.timezone_name)
+
+    def today(self) -> date:
+        return datetime.now(self.timezone).date()
+
+
+def _resolve_timezone_name() -> str:
+    raw = os.environ.get("TZ")
+    if raw is None:
+        return _DEFAULT_TIMEZONE
+    name = raw.strip()
+    if name.startswith(":"):
+        name = name[1:]
+    if not name:
+        return _DEFAULT_TIMEZONE
+    try:
+        ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        raise ConfigError(f"TZ={raw!r} is not a valid IANA timezone name") from exc
+    return name
 
 
 def _parse_bool(value: str | None, default: bool) -> bool:
@@ -97,7 +119,7 @@ def load_config(env_path: Path | None = None, *, dry_run: bool | None = None) ->
         codmon_password=codmon_password,
         huckleberry_email=huckleberry_email,
         huckleberry_password=huckleberry_password,
-        timezone_name=os.environ.get("TIMEZONE", "Asia/Tokyo"),
+        timezone_name=_resolve_timezone_name(),
         dry_run=dry_run,
         data_dir=data_dir,
         headless=_parse_bool(os.environ.get("HEADLESS"), True),

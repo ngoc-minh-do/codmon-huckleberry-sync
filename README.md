@@ -56,7 +56,7 @@ uv run codmon-sync sync --date 2026-10-01        # dry run by default (DRY_RUN=t
 uv run codmon-sync sync --date 2026-10-01 --no-dry-run
 ```
 
-Without `--date`, today is used (in `TIMEZONE`, default `Asia/Tokyo`).
+Without `--date`, today is used (in `TZ`, default `Asia/Tokyo`).
 
 ### Introspection (when your nursery's report layout differs)
 
@@ -105,7 +105,7 @@ scheduling, point any scheduler at that `docker run` command.
 | `LLM_API_KEY` | no | — | Optional Bearer token for the endpoint |
 | `LLM_TIMEOUT` | no | `180` | Max seconds to wait for a translation response |
 | `APPRISE_URL` | no | — | Apprise webhook; posts a success/failure notification after each real sync |
-| `TIMEZONE` | no | `Asia/Tokyo` | IANA timezone used for event timestamps |
+| `TZ` | no | `Asia/Tokyo` | Standard IANA timezone used for event timestamps and "today" |
 | `DRY_RUN` | no | `true` | Plan only; do not write to Huckleberry |
 | `DATA_DIR` | no | `data` | Introspection output directory |
 | `HEADLESS` | no | `true` | Run headless Chromium |

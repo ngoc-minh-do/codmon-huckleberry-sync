@@ -56,11 +56,13 @@ class CodmonClient:
         email: str,
         password: str,
         *,
+        timezone: str,
         headless: bool = True,
         record_har_path: str | None = None,
     ) -> None:
         self.email = email
         self.password = password
+        self.timezone = timezone
         self.headless = headless
         self.record_har_path = record_har_path
         self._responses: list[dict] = []
@@ -76,7 +78,7 @@ class CodmonClient:
         self._browser = await self._playwright_handle.chromium.launch(headless=self.headless)
         self._context = await self._browser.new_context(
             viewport={"width": 390, "height": 844},
-            timezone_id="Asia/Tokyo",
+            timezone_id=self.timezone,
             locale="ja-JP",
             user_agent=MOBILE_UA,
             record_har_path=self.record_har_path,
@@ -283,7 +285,7 @@ class CodmonClient:
             await page.go_back()
         await page.wait_for_timeout(1800)
 
-    async def introspect(self, output_dir: Path, target: date | None = None) -> DailyReport:
+    async def introspect(self, output_dir: Path, target: date) -> DailyReport:
         assert self.page is not None
         await self.login()
         await self._dump_step(output_dir / "login_after")
@@ -299,7 +301,7 @@ class CodmonClient:
         await self._write_network(output_dir, network)
         await self._write_requests(output_dir, requests)
 
-        return DailyReport(date=target or date.today(), posts=posts, network=network)
+        return DailyReport(date=target, posts=posts, network=network)
 
     async def _dump_storage(self, prefix: Path) -> None:
         assert self.page is not None and self._context is not None
