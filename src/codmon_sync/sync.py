@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 
 from .codmon.api import CodmonApiClient
 from .codmon.client import CodmonClient
@@ -29,6 +29,7 @@ class SyncResult:
     activity: int = 0
     temperature: int = 0
     poo: int = 0
+    growth: int = 0
     planned: int = 0
     translated: int = 0
     written: int = 0
@@ -130,36 +131,49 @@ async def sync_day(
     day = target or cfg.today()
 
     report = await _fetch_report(cfg, day, child)
-    if not report.posts:
+    report_events: list = []
+    summary = None
+    if report.posts:
+        summary = extract_summary(report)
+        report_events = plan_events(
+            summary,
+            cfg.timezone,
+            sync_temperature=cfg.sync_temperature,
+            sync_diaper=cfg.sync_diaper,
+            sync_bath=cfg.sync_bath,
+            bath_time=cfg.bath_time,
+        )
+    else:
         _LOGGER.warning("No Codmon daily report posts found for %s", day)
-        return SyncResult(day=day, dry_run=effective_dry_run)
 
-    summary = extract_summary(report)
-    events = plan_events(
-        summary,
-        cfg.timezone,
-        sync_temperature=cfg.sync_temperature,
-        sync_diaper=cfg.sync_diaper,
-        sync_bath=cfg.sync_bath,
-        bath_time=cfg.bath_time,
-    )
-    translated = await _maybe_translate(cfg, events)
+    translated = await _maybe_translate(cfg, report_events)
+
+    # The growth API filters by record_date (a month label, 1st of month), so a
+    # record entered today can live under a record_date weeks earlier. Query a
+    # window ~13 months back and keep only records the nursery entered on this day.
+    raw_growth = await _fetch_growth_records(cfg, day - timedelta(days=400), day + timedelta(days=7), child)
+    day_growth = [record for record in parse_growth_records(raw_growth) if record.measured_on == day]
+    growth_events = plan_growth_events(day_growth, cfg.timezone)
+
+    events = report_events + growth_events
     result = SyncResult(
         day=day,
         dry_run=effective_dry_run,
         posts=len(report.posts),
-        milk=len(summary.milk_events),
-        sleep=len(summary.sleep_events),
-        meal=len(summary.meal_events),
-        activity=len(summary.activities),
-        temperature=len(summary.temperature_events),
-        poo=len(summary.poo_events),
+        milk=len(summary.milk_events) if summary else 0,
+        sleep=len(summary.sleep_events) if summary else 0,
+        meal=len(summary.meal_events) if summary else 0,
+        activity=len(summary.activities) if summary else 0,
+        temperature=len(summary.temperature_events) if summary else 0,
+        poo=len(summary.poo_events) if summary else 0,
+        growth=len(growth_events),
         planned=len(events),
         translated=translated,
         events=events,
     )
     _LOGGER.info(
-        "Parsed %s: %d milk, %d sleep, %d meal, %d activity, %d temperature, %d poo -> %d Huckleberry events (dry_run=%s)",
+        "Parsed %s: %d milk, %d sleep, %d meal, %d activity, %d temperature, %d poo, "
+        "%d growth -> %d Huckleberry events (dry_run=%s)",
         day,
         result.milk,
         result.sleep,
@@ -167,12 +181,16 @@ async def sync_day(
         result.activity,
         result.temperature,
         result.poo,
+        result.growth,
         result.planned,
         effective_dry_run,
     )
     if translated:
         _LOGGER.info(
-            "Translated %d of %d activity description(s) via %s", translated, len(summary.activities), cfg.llm_model
+            "Translated %d of %d activity description(s) via %s",
+            translated,
+            len(summary.activities) if summary else 0,
+            cfg.llm_model,
         )
     if not events:
         _LOGGER.warning("No parseable events for %s", day)
@@ -284,12 +302,7 @@ async def sync_growth(
     child = child or cfg.child
     day_end = end or cfg.today()
 
-    client = CodmonApiClient(cfg.codmon_email, cfg.codmon_password)
-    await client.start()
-    try:
-        raw_records = await client.fetch_growth_records(start, day_end, child=child)
-    finally:
-        await client.stop()
+    raw_records = await _fetch_growth_records(cfg, start, day_end, child)
 
     records = parse_growth_records(raw_records)
     events = plan_growth_events(records, cfg.timezone)
@@ -338,6 +351,23 @@ async def _fetch_report(cfg: Config, day: date, child: str | None) -> DailyRepor
     await client.start()
     try:
         return await client.fetch_daily_report(day, child=child)
+    finally:
+        await client.stop()
+
+
+async def _fetch_growth_records(
+    cfg: Config,
+    start: date,
+    end: date,
+    child: str | None,
+) -> list[dict]:
+    if cfg.codmon_transport == "browser":
+        _LOGGER.warning("Growth records are unavailable with CODMON_TRANSPORT=browser; skipping")
+        return []
+    client = CodmonApiClient(cfg.codmon_email, cfg.codmon_password)
+    await client.start()
+    try:
+        return await client.fetch_growth_records(start, end, child=child)
     finally:
         await client.stop()
 

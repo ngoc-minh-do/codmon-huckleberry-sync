@@ -171,7 +171,7 @@ def _format_sync(cfg, result: SyncResult) -> str:
     lines = [f"{result.day}  posts={result.posts}"]
     lines.append(
         f"milk={result.milk} sleep={result.sleep} meal={result.meal} "
-        f"activity={result.activity} temp={result.temperature} poo={result.poo}"
+        f"activity={result.activity} temp={result.temperature} poo={result.poo} growth={result.growth}"
     )
     if result.translated:
         lines.append(f"memos translated: {result.translated}/{result.activity}")
@@ -293,6 +293,7 @@ def _result_json(command: str, result) -> str:
             "activity": result.activity,
             "temperature": result.temperature,
             "poo": result.poo,
+            "growth": result.growth,
             "planned": result.planned,
             "translated": result.translated,
             "written": result.written,
