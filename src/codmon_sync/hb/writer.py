@@ -65,9 +65,16 @@ class HuckleberryWriter:
         raise ConfigError(f"No Huckleberry child matches {child!r}")
 
     async def apply(self, events: list[PlannedEvent], day: date) -> ApplyResult:
+        existing = await self._collect_existing(day, day)
+        return await self._dedupe_apply(events, existing)
+
+    async def apply_range(self, events: list[PlannedEvent], start: date, end: date) -> ApplyResult:
+        existing = await self._collect_existing(start, end)
+        return await self._dedupe_apply(events, existing)
+
+    async def _dedupe_apply(self, events: list[PlannedEvent], existing: list) -> ApplyResult:
         if not self._api or not self._child_uid:
             raise RuntimeError("HuckleberryWriter.connect() must be called before apply()")
-        existing = await self._collect_existing(day)
         window_seconds = self.config.dedup_window_minutes * 60
         written = 0
         written_by_kind: dict[str, int] = defaultdict(int)
@@ -75,13 +82,23 @@ class HuckleberryWriter:
         for event in events:
             kind_key = self._kind_key(event)
             start_label = event.start.astimezone(self.config.timezone).strftime("%Y-%m-%d %H:%M")
-            duplicates = [
-                start_sec
-                for existing_kind, start_sec in existing
-                if existing_kind == kind_key and abs(start_sec - event.start.timestamp()) <= window_seconds
-            ]
+            if event.kind == "growth":
+                duplicates = [
+                    start_sec
+                    for existing_kind, start_sec in existing
+                    if existing_kind == kind_key
+                    and datetime.fromtimestamp(start_sec, tz=self.config.timezone).date() == event.start.date()
+                ]
+            else:
+                duplicates = [
+                    start_sec
+                    for existing_kind, start_sec in existing
+                    if existing_kind == kind_key and abs(start_sec - event.start.timestamp()) <= window_seconds
+                ]
             if duplicates:
-                dup_time = datetime.fromtimestamp(min(duplicates), tz=self.config.timezone).strftime("%Y-%m-%d %H:%M")
+                dup_time = datetime.fromtimestamp(min(duplicates), tz=self.config.timezone).strftime(
+                    "%Y-%m-%d %H:%M"
+                )
                 _LOGGER.info("SKIP %s at %s (already in Huckleberry at %s)", event.kind, start_label, dup_time)
                 skipped_by_kind[event.kind] += 1
                 continue
@@ -94,15 +111,15 @@ class HuckleberryWriter:
             written=written, written_by_kind=dict(written_by_kind), skipped_by_kind=dict(skipped_by_kind)
         )
 
-    async def _collect_existing(self, day: date) -> list[tuple[str, float]]:
+    async def _collect_existing(self, start_day: date, end_day: date | None = None) -> list[tuple[str, float]]:
         if not self._api or not self._child_uid:
             return []
         client = await self._api._get_firestore_client()
         child = self._child_uid
 
-        day_start = datetime.combine(day, time(0, 0), tzinfo=self.config.timezone)
+        day_start = datetime.combine(start_day, time(0, 0), tzinfo=self.config.timezone)
         earliest = day_start.timestamp() - 24 * 3600
-        latest = (day_start + timedelta(days=1)).timestamp() + 24 * 3600
+        latest = (datetime.combine(end_day or start_day, time(0, 0), tzinfo=self.config.timezone) + timedelta(days=1)).timestamp() + 24 * 3600
 
         collections = [
             ("feed", "intervals"),
@@ -155,7 +172,11 @@ class HuckleberryWriter:
         if top == "activities":
             return f"activity:{mode}" if mode else None
         if top == "health":
-            return "temperature" if mode == "temperature" else None
+            if mode == "temperature":
+                return "temperature"
+            if mode == "growth":
+                return "growth"
+            return None
         if top == "diaper":
             return "diaper"
         return None
@@ -242,6 +263,62 @@ class HuckleberryWriter:
                 merge=True,
             )
 
+    async def _write_growth(self, event: PlannedEvent) -> None:
+        client = await self._api._get_firestore_client()
+        child = self._child_uid
+        start_timestamp = event.start.timestamp()
+        current_time = _time.time()
+        offset = self._tz_offset_minutes()
+        interval_id = f"{int(current_time * 1000)}-{uuid.uuid4().hex[:20]}"
+
+        entry: dict = {
+            "mode": "growth",
+            "start": start_timestamp,
+            "lastUpdated": current_time,
+            "offset": offset,
+        }
+        weight = event.payload.get("weight")
+        height = event.payload.get("height")
+        head = event.payload.get("head")
+        if weight is not None:
+            entry["weight"] = float(weight)
+            entry["weightUnits"] = "kg"
+        if height is not None:
+            entry["height"] = float(height)
+            entry["heightUnits"] = "cm"
+        if head is not None:
+            entry["head"] = float(head)
+            entry["headUnits"] = "hcm"
+
+        health_ref = client.collection("health").document(child)
+        await health_ref.collection("data").document(interval_id).set(_without_none(entry))
+
+        health_doc = await health_ref.get()
+        raw = health_doc.to_dict() or {}
+        existing = (raw.get("prefs") or {}).get("lastGrowthEntry") or {}
+        existing_start = existing.get("start")
+        should_update = existing_start is None or start_timestamp >= float(existing_start)
+        if should_update:
+            last = dict(entry)
+            last.update(
+                {
+                    "_id": interval_id,
+                    "type": "health",
+                    "isNight": False,
+                    "multientry_key": None,
+                }
+            )
+            await health_ref.set(
+                {
+                    "prefs": {
+                        "lastGrowthEntry": last,
+                        "timestamp": {"seconds": current_time},
+                        "local_timestamp": current_time,
+                    }
+                },
+                merge=True,
+            )
+
     async def _dispatch(self, event: PlannedEvent) -> None:
         assert self._api is not None and self._child_uid is not None
         api = self._api
@@ -278,6 +355,8 @@ class HuckleberryWriter:
                 )
             elif event.kind == "temperature":
                 await self._write_temperature(event)
+            elif event.kind == "growth":
+                await self._write_growth(event)
             elif event.kind == "diaper":
                 await api.log_diaper(
                     child,

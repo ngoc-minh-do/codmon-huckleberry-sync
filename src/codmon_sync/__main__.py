@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from .config import ConfigError, load_config
 
 if TYPE_CHECKING:
-    from .sync import BackfillResult, SyncResult
+    from .sync import BackfillResult, GrowthSyncResult, SyncResult
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -71,6 +71,21 @@ def _build_parser() -> argparse.ArgumentParser:
     backfill.add_argument("--dry-run", dest="dry_run", action="store_true", default=None)
     backfill.add_argument("--no-dry-run", dest="dry_run", action="store_false")
     backfill.add_argument("--child", default=None)
+
+    growth = subparsers.add_parser(
+        "sync-growth",
+        help="Sync Codmon growth records (成長記録 measurements: height/weight/head) into Huckleberry",
+    )
+    growth.add_argument(
+        "--start",
+        type=lambda value: date.fromisoformat(value),
+        default=None,
+        help="First record date YYYY-MM-DD (default: ~3 years ago)",
+    )
+    growth.add_argument("--end", type=lambda value: date.fromisoformat(value), default=None)
+    growth.add_argument("--dry-run", dest="dry_run", action="store_true", default=None)
+    growth.add_argument("--no-dry-run", dest="dry_run", action="store_false")
+    growth.add_argument("--child", default=None)
     return parser
 
 
@@ -100,7 +115,15 @@ def main(argv: list[str] | None = None) -> int:
     return asyncio.run(_run_sync_with_notify(cfg, args, command, target))
 
 
-_KIND_ORDER = {"bottle": 0, "sleep": 1, "solids": 2, "activity": 3, "temperature": 4, "diaper": 5}
+_KIND_ORDER = {
+    "bottle": 0,
+    "sleep": 1,
+    "solids": 2,
+    "activity": 3,
+    "temperature": 4,
+    "diaper": 5,
+    "growth": 6,
+}
 
 
 async def _run_sync_with_notify(cfg, args, command: str, target: date) -> int:
@@ -117,6 +140,15 @@ async def _run_sync_with_notify(cfg, args, command: str, target: date) -> int:
             result = await backfill(cfg, start, args.end, dry_run=args.dry_run, child=args.child)
             title, body = OK_TITLE, _format_backfill(cfg, result)
             code = 1 if result.days_failed else 0
+        elif command == "sync-growth":
+            from datetime import timedelta
+
+            from .sync import sync_growth
+
+            start = args.start or cfg.today() - timedelta(days=365 * 3)
+            result = await sync_growth(cfg, start, args.end, dry_run=args.dry_run, child=args.child)
+            title, body = OK_TITLE, _format_growth(cfg, result)
+            code = 0
         else:
             from .sync import sync_day
 
@@ -168,6 +200,25 @@ def _format_backfill(cfg, result: BackfillResult) -> str:
     return "\n".join(lines)
 
 
+def _format_growth(cfg, result: GrowthSyncResult) -> str:
+    lines = [
+        f"growth records {result.start}..{result.end}",
+        f"records={result.records}",
+    ]
+    if not result.events:
+        lines.append("no measurement records to sync")
+        return "\n".join(lines)
+    for event in sorted(result.events, key=lambda e: e.start):
+        when = event.start.astimezone(cfg.timezone).strftime("%Y-%m-%d %H:%M")
+        lines.append(f"- {when} {_event_summary(event)}")
+    if result.skipped_by_kind:
+        skipped = ", ".join(f"{kind}={count}" for kind, count in sorted(result.skipped_by_kind.items()))
+        lines.append(f"\nskipped (already in Huckleberry): {skipped}")
+    written = sum(result.written_by_kind.values())
+    lines.append(f"planned={len(result.events)} written={written}")
+    return "\n".join(lines)
+
+
 def _event_summary(event) -> str:
     payload = event.payload or {}
     mode = payload.get("mode")
@@ -186,6 +237,15 @@ def _event_summary(event) -> str:
         return f"{payload.get('amount')}{payload.get('units')}"
     if event.kind == "diaper":
         return f"{payload.get('mode')} {payload.get('consistency', '')}".strip()
+    if event.kind == "growth":
+        parts = []
+        if payload.get("weight") is not None:
+            parts.append(f"{payload['weight']}kg")
+        if payload.get("height") is not None:
+            parts.append(f"{payload['height']}cm")
+        if payload.get("head") is not None:
+            parts.append(f"head {payload['head']}cm")
+        return " ".join(parts)
     return str(mode or "")
 
 
@@ -204,6 +264,20 @@ def _result_json(command: str, result) -> str:
             "daysFailed": result.days_failed,
             "written": result.written,
             "writtenByKind": dict(result.written_by_kind),
+        }
+    elif command == "sync-growth":
+        payload = {
+            "complete": 1,
+            "code": 0,
+            "command": command,
+            "start": result.start.isoformat(),
+            "end": result.end.isoformat(),
+            "dryRun": result.dry_run,
+            "records": result.records,
+            "planned": len(result.events),
+            "written": result.written,
+            "writtenByKind": dict(result.written_by_kind),
+            "skippedByKind": dict(result.skipped_by_kind),
         }
     else:
         payload = {

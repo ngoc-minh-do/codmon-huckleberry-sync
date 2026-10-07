@@ -9,11 +9,11 @@ from zoneinfo import ZoneInfo
 
 from huckleberry_api.models import SolidsFoodReference
 
-from .parser import DailySummary
+from .parser import DailySummary, GrowthRecord
 
 _LOGGER = logging.getLogger(__name__)
 
-EventKind = Literal["bottle", "sleep", "solids", "activity", "temperature", "diaper"]
+EventKind = Literal["bottle", "sleep", "solids", "activity", "temperature", "diaper", "growth"]
 
 _OUTDOOR_KEYWORDS = (
     "散歩",
@@ -169,6 +169,43 @@ def _combine(day, value: time | None, tz: ZoneInfo) -> datetime | None:
     if value is None:
         return None
     return datetime.combine(day, value, tzinfo=tz)
+
+
+def plan_growth_events(
+    records: list[GrowthRecord],
+    tz: ZoneInfo,
+) -> list[PlannedEvent]:
+    """Map Codmon growth measurements to single combined Huckleberry entries.
+
+    Huckleberry's growth tracker stores weight/height/head circumference in
+    one entry per timestamp. The event time uses the nursery's ``insert`` time
+    of day when known, falling back to ``_DEFAULT_GROWTH_TIME``.
+    """
+    events: list[PlannedEvent] = []
+    for record in records:
+        payload: dict = {}
+        if record.weight is not None:
+            payload["weight"] = record.weight
+        if record.height is not None:
+            payload["height"] = record.height
+        if record.head is not None:
+            payload["head"] = record.head
+        if record.chest is not None:
+            _LOGGER.info(
+                "Dropping chest measurement %scm on %s (not supported by Huckleberry)",
+                record.chest,
+                record.measured_on,
+            )
+        if not payload:
+            continue
+        start = _combine(record.measured_on, record.measured_at or _DEFAULT_GROWTH_TIME, tz)
+        if start is None:
+            continue
+        events.append(PlannedEvent(kind="growth", start=start, end=None, payload=payload))
+    return events
+
+
+_DEFAULT_GROWTH_TIME = time(9, 30)
 
 
 def solids_reference(food_name: str) -> SolidsFoodReference:

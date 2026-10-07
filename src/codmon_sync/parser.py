@@ -75,6 +75,16 @@ class PooEvent:
 
 
 @dataclass
+class GrowthRecord:
+    measured_on: date
+    measured_at: time | None = None
+    height: float | None = None
+    weight: float | None = None
+    head: float | None = None
+    chest: float | None = None
+
+
+@dataclass
 class DailySummary:
     date: date
     milk_events: list[MilkEvent] = field(default_factory=list)
@@ -92,6 +102,62 @@ def _parse_hhmm(text: str) -> time | None:
     if not match:
         return None
     return time(int(match.group(1)), int(match.group(2)))
+
+
+def _parse_float(text: str) -> float | None:
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_growth_records(raw_records: list[dict]) -> list[GrowthRecord]:
+    """Convert raw member_growths API records into merged per-day measurements.
+
+    The measurement moment is taken from ``insert_datetime`` (when the nursery
+    entered it); ``record_date`` is only a month label (first of month) in the
+    Codmon UI. Multiple API records sharing a measurement ``measured_on`` (e.g.
+    one record per nursery relationship) are merged into a single record
+    carrying every measurement: Huckleberry stores one growth entry per day.
+    """
+    merged: dict[date, tuple[dict[str, float], time | None]] = {}
+    for raw in raw_records:
+        raw_stamp = str(raw.get("insert_datetime") or raw.get("record_date") or "")
+        day_raw, _, time_raw = raw_stamp.partition(" ")
+        try:
+            day = date.fromisoformat(day_raw[:10])
+        except ValueError:
+            continue
+        bucket, _ = merged.setdefault(day, ({}, None))
+        for key in ("height", "weight", "head", "chest"):
+            value = _parse_float(str(raw.get(key) or ""))
+            if value is not None:
+                bucket.setdefault(key, value)
+        if time_raw:
+            try:
+                measured_at = time.fromisoformat(time_raw[:8])
+            except ValueError:
+                measured_at = None
+            if measured_at is not None:
+                _, existing_at = merged[day]
+                if existing_at is None:
+                    merged[day] = (bucket, measured_at)
+
+    records = []
+    for day, (bucket, measured_at) in sorted(merged.items()):
+        if not bucket:
+            continue
+        records.append(
+            GrowthRecord(
+                measured_on=day,
+                measured_at=measured_at,
+                height=bucket.get("height"),
+                weight=bucket.get("weight"),
+                head=bucket.get("head"),
+                chest=bucket.get("chest"),
+            )
+        )
+    return records
 
 
 def _normalize_width(text: str) -> str:

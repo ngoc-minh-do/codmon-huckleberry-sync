@@ -39,6 +39,14 @@ Both integrations are unofficial and can break if either service changes.
    the report and relies on this live check, so syncs stay idempotent even if
    a previous run failed partway.
 
+Growth measurements (身長/体重/頭囲) live on the separate 成長記録 page
+(`/api/v2/parent/member_growths/`) and are not part of the daily report, so
+they are synced by a dedicated `sync-growth` command instead of `sync`.
+Each measurement is written at the date and time the nursery recorded it
+(`insert_datetime`; Codmon's `record_date` is only a month label), and a
+record is skipped if Huckleberry already has a growth entry that calendar day
+(chest circumference 胸囲 is dropped — Huckleberry has no field for it).
+
 ## Local setup
 
 Requires [uv](https://docs.astral.sh/uv/) and Python ≥ 3.14.
@@ -57,6 +65,19 @@ uv run codmon-sync sync --date 2026-10-01 --no-dry-run
 ```
 
 Without `--date`, today is used (in `TZ`, default `Asia/Tokyo`).
+
+### Sync growth records (measurements)
+
+```bash
+uv run codmon-sync sync-growth                  # dry run over the last ~3 years
+uv run codmon-sync sync-growth --no-dry-run
+uv run codmon-sync sync-growth --start 2026-04-01 --end 2026-09-30
+```
+
+`sync-growth` reads the nursery's 成長記録 (height/weight/head-circuit
+measurements) for the date range and writes one Huckleberry `growth` entry per
+measurement date. Like `sync`, it is dry-run by default and dedupes against
+Huckleberry's existing entries.
 
 ### Introspection (when your nursery's report layout differs)
 

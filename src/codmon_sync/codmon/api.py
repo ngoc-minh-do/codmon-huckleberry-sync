@@ -34,6 +34,7 @@ class CodmonApiClient:
         self._session: aiohttp.ClientSession | None = None
         self._ready = False
         self._service_ids: list[str] = []
+        self._children: list[dict] = []
 
     async def start(self) -> CodmonApiClient:
         jar = aiohttp.CookieJar()
@@ -89,15 +90,8 @@ class CodmonApiClient:
         return body.get("data", [])
 
     @staticmethod
-    def _service_ids_for(children: list[dict], child: str | None) -> list[str]:
-        def collect(child_doc: dict) -> list[str]:
-            service_ids = []
-            for relation in child_doc.get("child_member_relations", []):
-                service_id = relation.get("service_id")
-                if service_id and service_id not in service_ids:
-                    service_ids.append(service_id)
-            return service_ids
-
+    def _children_for(children: list[dict], child: str | None) -> list[dict]:
+        """Return the child documents to sync, honoring the optional CHILD match."""
         if child:
             needle = child.strip().lower()
             for child_doc in children:
@@ -106,11 +100,29 @@ class CodmonApiClient:
                 child_id = str(child_doc.get("id") or "")
                 for candidate in (child_id, name, kana):
                     if needle == candidate or (candidate and needle in candidate):
-                        return collect(child_doc)
+                        return [child_doc]
             raise CodmonError(f"No Codmon child matches {child!r}")
         if children:
-            return collect(children[0])
+            return [children[0]]
         return []
+
+    @staticmethod
+    def _relation_values(children: list[dict], child: str | None, key: str) -> list[str]:
+        values: list[str] = []
+        for child_doc in CodmonApiClient._children_for(children, child):
+            for relation in child_doc.get("child_member_relations", []):
+                value = relation.get(key)
+                if value and value not in values:
+                    values.append(value)
+        return values
+
+    @classmethod
+    def _service_ids_for(cls, children: list[dict], child: str | None) -> list[str]:
+        return cls._relation_values(children, child, "service_id")
+
+    @classmethod
+    def _member_ids_for(cls, children: list[dict], child: str | None) -> list[str]:
+        return cls._relation_values(children, child, "member_id")
 
     async def _timeline_page(self, start: date, end: date, service_id: str, page: int) -> dict:
         params = [
@@ -201,10 +213,49 @@ class CodmonApiClient:
             return
         await self.login()
         children = await self.children()
+        self._children = children
         self._service_ids = self._service_ids_for(children, child)
         if not self._service_ids:
             raise CodmonError("No nursery service found for this Codmon account")
         self._ready = True
+
+    async def fetch_growth_records(
+        self,
+        start: date,
+        end: date,
+        child: str | None = None,
+    ) -> list[dict]:
+        """Fetch the child's growth-measurement records (成長記録) in [start, end].
+
+        Returns raw records: each has ``insert_datetime`` (actual measurement
+        day; ``record_date`` is only a month label), and any of ``height``
+        (cm), ``weight`` (kg), ``chest`` (cm), ``head`` (cm).
+        """
+        await self._ensure_ready(child)
+        member_ids = self._member_ids_for(self._children, child)
+        if not member_ids:
+            return []
+
+        records: list[dict] = []
+        seen: set[tuple[str, str]] = set()
+        for member_id in member_ids:
+            params = [
+                (ENV_PARAM, ENV_VALUE),
+                ("search_start_record_date", start.isoformat()),
+                ("search_end_record_date", end.isoformat()),
+                ("relation_id[]", member_id),
+            ]
+            body = await self._request("GET", "/api/v2/parent/member_growths/", params=params)
+            for item in body.get("data", []):
+                key = (member_id, str(item.get("id") or ""))
+                if key in seen:
+                    continue
+                seen.add(key)
+                records.append(item)
+
+        records.sort(key=lambda record: str(record.get("record_date") or ""))
+        _LOGGER.info("Growth records: %d measurements in %s..%s", len(records), start, end)
+        return records
 
     def _report_post(self, item: dict) -> tuple[date, CodmonPost] | None:
         if str(item.get("kind")) != "4":

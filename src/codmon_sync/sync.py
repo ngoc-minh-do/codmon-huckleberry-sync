@@ -10,8 +10,8 @@ from .codmon.client import CodmonClient
 from .codmon.models import DailyReport
 from .config import Config
 from .hb.writer import HuckleberryWriter
-from .mapping import plan_events
-from .parser import extract_summary
+from .mapping import plan_events, plan_growth_events
+from .parser import extract_summary, parse_growth_records
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,6 +46,18 @@ class BackfillResult:
     days_failed: int = 0
     written: int = 0
     written_by_kind: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass
+class GrowthSyncResult:
+    start: date
+    end: date
+    dry_run: bool
+    records: int = 0
+    events: list = field(default_factory=list)
+    written: int = 0
+    written_by_kind: dict[str, int] = field(default_factory=dict)
+    skipped_by_kind: dict[str, int] = field(default_factory=dict)
 
 
 async def introspect(cfg: Config, target: date | None, output: str | None) -> DailyReport:
@@ -258,6 +270,59 @@ async def backfill(
     finally:
         if translator is not None:
             await translator.close()
+
+
+async def sync_growth(
+    cfg: Config,
+    start: date,
+    end: date | None,
+    *,
+    dry_run: bool | None = None,
+    child: str | None = None,
+) -> GrowthSyncResult:
+    effective_dry_run = cfg.dry_run if dry_run is None else dry_run
+    child = child or cfg.child
+    day_end = end or cfg.today()
+
+    client = CodmonApiClient(cfg.codmon_email, cfg.codmon_password)
+    await client.start()
+    try:
+        raw_records = await client.fetch_growth_records(start, day_end, child=child)
+    finally:
+        await client.stop()
+
+    records = parse_growth_records(raw_records)
+    events = plan_growth_events(records, cfg.timezone)
+
+    result = GrowthSyncResult(
+        start=start,
+        end=day_end,
+        dry_run=effective_dry_run,
+        records=len(records),
+        events=events,
+    )
+    _LOGGER.info(
+        "Growth sync: %d measurement records in %s..%s -> %d Huckleberry events (dry_run=%s)",
+        result.records,
+        start,
+        day_end,
+        len(events),
+        effective_dry_run,
+    )
+    if not events:
+        return result
+
+    writer = HuckleberryWriter(cfg, dry_run=effective_dry_run)
+    try:
+        await writer.connect(child=child)
+        applied = await writer.apply_range(events, start, day_end)
+    finally:
+        await writer.close()
+
+    result.written = applied.written
+    result.written_by_kind = applied.written_by_kind
+    result.skipped_by_kind = applied.skipped_by_kind
+    return result
 
 
 async def _fetch_report(cfg: Config, day: date, child: str | None) -> DailyReport:
