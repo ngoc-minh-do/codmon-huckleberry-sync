@@ -5,11 +5,18 @@ keeping changes focused and well-tested matters more than process ceremony.
 
 ## Development setup
 
-Requires [uv](https://docs.astral.sh/uv/) and Python ≥ 3.14.
+Requires [uv](https://docs.astral.sh/uv/) and Python ≥ 3.14 (pinned in
+`.python-version`).
 
 ```bash
 uv sync
 cp .env.example .env   # fill in credentials to run against the real services
+```
+
+Install the git hooks (ruff, uv-lock, ty, commitizen) once:
+
+```bash
+make install   # or: uv sync && uv run prek install
 ```
 
 ## Canonical check
@@ -17,12 +24,13 @@ cp .env.example .env   # fill in credentials to run against the real services
 Run exactly what CI runs before opening a pull request:
 
 ```bash
-uv run ruff check .
-uv run ruff format --check .
-uv run pytest
+make check
 ```
 
-Formatting is enforced with `ruff format`; apply it with `uv run ruff format .`.
+That runs `ruff check`, `ruff format --check`, `ty check`, and `pytest`.
+Formatting is enforced with `ruff format`; apply it with `make fix` (or
+`uv run ruff format .`). Type checking uses [ty](https://github.com/astral-sh/ty),
+run with `--exit-zero-on-warning` while adoption is incremental.
 
 ## Tests
 

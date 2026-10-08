@@ -53,8 +53,7 @@ def _resolve_timezone_name() -> str:
     if raw is None:
         return _DEFAULT_TIMEZONE
     name = raw.strip()
-    if name.startswith(":"):
-        name = name[1:]
+    name = name.removeprefix(":")
     if not name:
         return _DEFAULT_TIMEZONE
     try:

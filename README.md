@@ -153,10 +153,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow. The canonical
 check (what CI runs) is:
 
 ```bash
-uv run ruff check .
-uv run ruff format --check .
-uv run pytest
+make check
 ```
+
+which runs `ruff check`, `ruff format --check`, `ty check`, and `pytest`.
+`make install` also sets up the git hooks.
 
 ## Contributing
 

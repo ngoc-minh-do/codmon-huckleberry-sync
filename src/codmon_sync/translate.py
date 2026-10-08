@@ -218,8 +218,7 @@ class ActivityTranslator:
         text = content.strip()
         if text.startswith("```"):
             text = text.split("```", 2)[1]
-            if text.startswith("json"):
-                text = text[4:]
+            text = text.removeprefix("json")
             text = text.strip()
         try:
             return json.loads(text)

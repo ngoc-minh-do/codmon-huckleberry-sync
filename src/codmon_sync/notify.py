@@ -25,11 +25,13 @@ class AppriseNotifier:
             return False
         payload = {"title": title, "body": body, "type": message_type}
         try:
-            async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
-                async with session.post(self.url, json=payload) as response:
-                    response.raise_for_status()
-                    _LOGGER.info("Apprise notification sent: %s", title)
-                    return True
+            async with (
+                aiohttp.ClientSession(timeout=_TIMEOUT) as session,
+                session.post(self.url, json=payload) as response,
+            ):
+                response.raise_for_status()
+                _LOGGER.info("Apprise notification sent: %s", title)
+                return True
         except Exception as exc:
             _LOGGER.warning("Apprise notification failed (%s): %s", title, exc)
             return False

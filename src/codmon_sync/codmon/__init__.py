@@ -4,11 +4,11 @@ from codmon_sync.codmon.client import CodmonError as BrowserError
 from codmon_sync.codmon.models import CodmonDailyContent, CodmonPost, DailyReport
 
 __all__ = [
+    "BrowserError",
     "CodmonApiClient",
     "CodmonClient",
-    "CodmonError",
-    "BrowserError",
     "CodmonDailyContent",
+    "CodmonError",
     "CodmonPost",
     "DailyReport",
 ]
