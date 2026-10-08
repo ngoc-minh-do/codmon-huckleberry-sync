@@ -19,6 +19,19 @@ _SYSTEM_PROMPT = (
 
 _BATCH_SIZE = 15
 
+_TRUNCATION_RATIO = 0.5
+_TRUNCATION_MIN_SOURCE = 150
+
+
+def _looks_truncated(source: str, translation: str) -> bool:
+    if not source or not translation:
+        return False
+    if translation == source:
+        return False
+    if len(source) < _TRUNCATION_MIN_SOURCE:
+        return False
+    return len(translation) < len(source) * _TRUNCATION_RATIO
+
 
 @dataclass(frozen=True)
 class LlmConfig:
@@ -54,12 +67,30 @@ class ActivityTranslator:
         if missing:
             for chunk_start in range(0, len(missing), _BATCH_SIZE):
                 chunk = missing[chunk_start : chunk_start + _BATCH_SIZE]
+                translated: dict[str, str] = {}
                 try:
-                    translated = await self._translate_chunk(chunk)
+                    translated.update(await self._translate_chunk(chunk))
                 except Exception as exc:
                     _LOGGER.warning("Activity translation failed for %d memo(s): %s", len(chunk), exc)
-                    translated = {text: text for text in chunk}
-                self._cache.update(translated)
+                for text in chunk:
+                    candidate = translated.get(text)
+                    if candidate is None or _looks_truncated(text, candidate):
+                        retried = await self._translate_single(text)
+                        if retried is None:
+                            _LOGGER.warning(
+                                "Activity translation failed for memo (%d chars); keeping original", len(text)
+                            )
+                            candidate = text
+                        else:
+                            candidate = retried
+                    if _looks_truncated(text, candidate):
+                        _LOGGER.warning(
+                            "Truncated translation for memo (%d chars) -> %d chars; falling back to original",
+                            len(text),
+                            len(candidate),
+                        )
+                        candidate = text
+                    self._cache[text] = candidate
         return {text: self._cache.get(text, text) for text in texts}
 
     async def close(self) -> None:
@@ -96,6 +127,45 @@ class ActivityTranslator:
             body = await response.json()
         content = body["choices"][0]["message"]["content"]
         return self._parse_json(content, chunk)
+
+    async def _translate_single(self, text: str) -> str | None:
+        """Retry one memo with an explicit completeness instruction.
+
+        Returns ``None`` when the model cannot produce a usable translation so
+        the caller can fall back to the original text.
+        """
+        if not text:
+            return None
+        payload = {
+            "model": self.config.model,
+            "messages": [
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": (
+                        "Translate the ENTIRE memo below into English. Every paragraph must be "
+                        "translated completely - do not summarize, condense, or omit any part. "
+                        "Reply with only the translation.\n\n" + text
+                    ),
+                },
+            ],
+            "temperature": 0.2,
+        }
+        headers = {"Content-Type": "application/json"}
+        if self.config.api_key:
+            headers["Authorization"] = f"Bearer {self.config.api_key}"
+        url = f"{self.config.base_url.rstrip('/')}/chat/completions"
+        if self._session is None:
+            self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.config.timeout))
+        try:
+            async with self._session.post(url, json=payload, headers=headers) as response:
+                response.raise_for_status()
+                body = await response.json()
+            content = body["choices"][0]["message"]["content"]
+            return content.strip() or None
+        except Exception as exc:
+            _LOGGER.warning("Individual activity translation failed: %s", exc)
+            return None
 
     @staticmethod
     def _parse_json(content: str, chunk: list[str]) -> dict[str, str]:
