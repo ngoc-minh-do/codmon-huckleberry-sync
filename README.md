@@ -1,5 +1,11 @@
 # codmon-huckleberry-sync
 
+[![CI](https://github.com/ngoc-minh-do/codmon-huckleberry-sync/actions/workflows/ci.yml/badge.svg)](https://github.com/ngoc-minh-do/codmon-huckleberry-sync/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+> Status: experimental. Both integrations are unofficial and may break without
+> notice.
+
 Syncs the nursery's daily report (milk, meals, naps, activities) from
 [Codmon](https://parents.codmon.com/) into the [Huckleberry](https://huckleberry.com/) baby tracking app.
 
@@ -140,3 +146,24 @@ scheduling, point any scheduler at that `docker run` command.
 - Huckleberry writes create permanent entries. Start with dry-run mode and
   verify planned events before enabling real sync.
 - Credentials are read from the environment; keep `.env` out of version control.
+
+## Development
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow. The canonical
+check (what CI runs) is:
+
+```bash
+uv run ruff check .
+uv run ruff format --check .
+uv run pytest
+```
+
+## Contributing
+
+Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md)
+and the [Code of Conduct](CODE_OF_CONDUCT.md). Report security issues privately
+per [SECURITY.md](SECURITY.md); do not open a public issue for them.
+
+## License
+
+Released under the [MIT License](LICENSE).

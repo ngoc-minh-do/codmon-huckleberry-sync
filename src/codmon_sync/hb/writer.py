@@ -96,9 +96,7 @@ class HuckleberryWriter:
                     if existing_kind == kind_key and abs(start_sec - event.start.timestamp()) <= window_seconds
                 ]
             if duplicates:
-                dup_time = datetime.fromtimestamp(min(duplicates), tz=self.config.timezone).strftime(
-                    "%Y-%m-%d %H:%M"
-                )
+                dup_time = datetime.fromtimestamp(min(duplicates), tz=self.config.timezone).strftime("%Y-%m-%d %H:%M")
                 _LOGGER.info("SKIP %s at %s (already in Huckleberry at %s)", event.kind, start_label, dup_time)
                 skipped_by_kind[event.kind] += 1
                 continue
@@ -119,7 +117,9 @@ class HuckleberryWriter:
 
         day_start = datetime.combine(start_day, time(0, 0), tzinfo=self.config.timezone)
         earliest = day_start.timestamp() - 24 * 3600
-        latest = (datetime.combine(end_day or start_day, time(0, 0), tzinfo=self.config.timezone) + timedelta(days=1)).timestamp() + 24 * 3600
+        latest = (
+            datetime.combine(end_day or start_day, time(0, 0), tzinfo=self.config.timezone) + timedelta(days=1)
+        ).timestamp() + 24 * 3600
 
         collections = [
             ("feed", "intervals"),

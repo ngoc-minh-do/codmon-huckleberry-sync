@@ -107,7 +107,7 @@ def _parse_hhmm(text: str) -> time | None:
 def _parse_float(text: str) -> float | None:
     try:
         return float(text)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 

@@ -1,0 +1,51 @@
+name: Bug report
+description: Something failed to sync, or parsed incorrectly
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please **do not** include real credentials or a
+        child's personal data — redact account emails, passwords, child names,
+        and any report content you consider private.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the problem and what you expected instead.
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: Command run
+      description: The exact command, with secrets redacted.
+      placeholder: uv run codmon-sync sync --date 2026-10-01
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: Log output around the failure, with secrets and personal data removed.
+      render: text
+    validations:
+      required: false
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python version, and whether you run the Docker image or `uv`.
+      placeholder: Ubuntu 24.04, Python 3.14, uv
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I reproduced this on the latest `main`.
+          required: true
+        - label: I have removed credentials and personal data from this report.
+          required: true
