@@ -8,6 +8,9 @@ to adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Temperature entries are written via `huckleberry_api`'s `log_temperature` again;
+  the direct-Firestore workaround is gone now that `huckleberry-api>=0.4.8`
+  accepts the app's string `multientry_key` batch references.
 - Activity memos are now translated paragraph by paragraph, so paragraphs are
   never silently dropped when the LLM output omits part of the memo.
 - Truncated or missing LLM translations now fall back to the original memo text

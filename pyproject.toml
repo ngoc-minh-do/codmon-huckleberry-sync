@@ -16,7 +16,7 @@ classifiers = [
     "Topic :: Utilities",
 ]
 dependencies = [
-    "huckleberry-api>=0.4.7",
+    "huckleberry-api>=0.4.8",
     "playwright>=1.48",
     "python-dotenv>=1.0",
     "tzdata>=2024.1",

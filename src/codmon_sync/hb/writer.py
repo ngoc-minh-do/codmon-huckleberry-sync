@@ -214,55 +214,6 @@ class HuckleberryWriter:
             return 0.0
         return -offset.total_seconds() / 60
 
-    async def _write_temperature(self, event: PlannedEvent) -> None:
-        client = await self._api._get_firestore_client()
-        child = self._child_uid
-        amount = float(event.payload["amount"])
-        units = event.payload.get("units", "C")
-        start_timestamp = event.start.timestamp()
-        current_time = _time.time()
-        offset = self._tz_offset_minutes()
-        interval_id = f"{int(current_time * 1000)}-{uuid.uuid4().hex[:20]}"
-
-        entry = {
-            "mode": "temperature",
-            "start": start_timestamp,
-            "lastUpdated": current_time,
-            "offset": offset,
-            "amount": amount,
-            "units": units,
-        }
-        health_ref = client.collection("health").document(child)
-        await health_ref.collection("data").document(interval_id).set(_without_none(entry))
-
-        health_doc = await health_ref.get()
-        raw = health_doc.to_dict() or {}
-        existing = (raw.get("prefs") or {}).get("lastTemperature") or {}
-        existing_start = existing.get("start")
-        should_update = existing_start is None or start_timestamp >= float(existing_start)
-        if should_update:
-            last = {
-                "_id": interval_id,
-                "type": "health",
-                "mode": "temperature",
-                "start": start_timestamp,
-                "lastUpdated": current_time,
-                "offset": offset,
-                "amount": amount,
-                "units": units,
-                "multientry_key": None,
-            }
-            await health_ref.set(
-                {
-                    "prefs": {
-                        "lastTemperature": last,
-                        "timestamp": {"seconds": current_time},
-                        "local_timestamp": current_time,
-                    }
-                },
-                merge=True,
-            )
-
     async def _write_growth(self, event: PlannedEvent) -> None:
         client = await self._api._get_firestore_client()
         child = self._child_uid
@@ -354,7 +305,12 @@ class HuckleberryWriter:
                     notes=event.payload.get("description", ""),
                 )
             elif event.kind == "temperature":
-                await self._write_temperature(event)
+                await api.log_temperature(
+                    child,
+                    start_time=event.start,
+                    amount=event.payload["amount"],
+                    units=event.payload.get("units", "C"),
+                )
             elif event.kind == "growth":
                 await self._write_growth(event)
             elif event.kind == "diaper":
