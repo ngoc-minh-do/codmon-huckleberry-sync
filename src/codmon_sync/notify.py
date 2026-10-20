@@ -8,8 +8,8 @@ _LOGGER = logging.getLogger(__name__)
 
 _TIMEOUT = aiohttp.ClientTimeout(total=15)
 
-OK_TITLE = "# 👍 sync ok"
-ERROR_TITLE = "# sync error"
+OK_TITLE = "# 👍 codmon sync ok"
+ERROR_TITLE = "# 🚨 codmon sync failed"
 
 
 class AppriseNotifier:

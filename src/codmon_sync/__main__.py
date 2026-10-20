@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 from datetime import date
 from typing import TYPE_CHECKING
 
@@ -162,7 +163,9 @@ async def _run_sync_with_notify(cfg, args, command: str, target: date) -> int:
             await notifier.send(title=title, body=body, message_type="success")
         return code
     except Exception as exc:
-        if not cfg.dry_run:
+        # Under Dagu the DAG-level handler owns failure reporting (it sends the
+        # rich step+log message), so skip our own to avoid duplicate alerts.
+        if not cfg.dry_run and not os.environ.get("DAG_NAME"):
             await notifier.send(title=ERROR_TITLE, body=f"{type(exc).__name__}: {exc}", message_type="failure")
         raise
 
