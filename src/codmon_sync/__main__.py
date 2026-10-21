@@ -159,7 +159,7 @@ async def _run_sync_with_notify(cfg, args, command: str, target: date) -> int:
         print(_result_json(command, result))
         if cfg.dry_run:
             return 0
-        if not code:
+        if not code and (command != "backfill" or result.written):
             await notifier.send(title=title, body=body, message_type="success")
         return code
     except Exception as exc:
