@@ -64,3 +64,4 @@ class DailyReport:
     date: date
     posts: list[CodmonPost] = field(default_factory=list)
     network: list[dict] = field(default_factory=list)
+    raw_items: list[dict] = field(default_factory=list)

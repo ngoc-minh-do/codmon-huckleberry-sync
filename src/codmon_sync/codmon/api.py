@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 import aiohttp
@@ -138,19 +138,39 @@ class CodmonApiClient:
         ]
         return await self._request("GET", "/api/v2/parent/timeline/", params=params)
 
-    async def fetch_daily_report(self, target: date, child: str | None = None) -> DailyReport:
+    async def fetch_daily_report(
+        self,
+        target: date,
+        child: str | None = None,
+        *,
+        today: date | None = None,
+    ) -> DailyReport:
+        """Fetch the daily report (連絡帳 posts) whose display_date is ``target``.
+
+        The timeline endpoint filters by when a post became visible
+        (``open_datetime``) rather than by ``display_date``, so a report
+        registered late (display_date = target, opened on a later day) is
+        invisible to an exact single-day query. Widen the request window up to
+        7 days past ``target`` (capped to the caller's ``today``) so
+        late-registered reports are still found, without paginating years of
+        timeline for an old target. Items whose display_date != target are
+        dropped.
+        """
         await self._ensure_ready(child)
 
+        window_end = min(max(target, today or target), target + timedelta(days=7))
         posts: list[CodmonPost] = []
         network: list[dict] = []
+        raw_items: list[dict] = []
         seen: set[str] = set()
 
         for service_id in self._service_ids:
             page = 1
             while True:
-                body = await self._timeline_page(target, target, service_id, page=page)
+                body = await self._timeline_page(target, window_end, service_id, page=page)
                 network.append({"service_id": service_id, "page": page})
                 for item in body.get("data", []):
+                    raw_items.append(item)
                     parsed = self._report_post(item)
                     if parsed is None:
                         continue
@@ -163,9 +183,15 @@ class CodmonApiClient:
                 if not isinstance(next_page, int) or next_page <= page:
                     break
                 page = next_page
-            _LOGGER.info("Timeline for %s: %d daily-report posts", target, len(posts))
+            _LOGGER.info(
+                "Timeline for %s (window %s..%s): %d daily-report posts",
+                target,
+                target,
+                window_end,
+                len(posts),
+            )
 
-        return DailyReport(date=target, posts=posts, network=network)
+        return DailyReport(date=target, posts=posts, network=network, raw_items=raw_items)
 
     async def fetch_reports_range(
         self,

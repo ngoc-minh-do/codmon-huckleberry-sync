@@ -45,6 +45,7 @@ class BackfillResult:
     dry_run: bool
     days: int = 0
     days_failed: int = 0
+    growth: int = 0
     written: int = 0
     written_by_kind: dict[str, int] = field(default_factory=dict)
 
@@ -74,7 +75,7 @@ async def _introspect_api(cfg: Config, target: date | None, output: str | None) 
     client = CodmonApiClient(cfg.codmon_email, cfg.codmon_password)
     await client.start()
     try:
-        report = await client.fetch_daily_report(day)
+        report = await client.fetch_daily_report(day, today=cfg.today())
         await _write_introspect_api(output_dir, report)
     finally:
         await client.stop()
@@ -97,6 +98,9 @@ async def _write_introspect_api(output_dir, report: DailyReport) -> None:
     output_dir.joinpath("api_report.txt").write_text("\n\n".join(lines), encoding="utf-8")
     output_dir.joinpath("network.json").write_text(
         json.dumps(report.network, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    output_dir.joinpath("api_items.json").write_text(
+        json.dumps(report.raw_items, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
 
@@ -233,6 +237,22 @@ async def backfill(
 
     result = BackfillResult(start=start, end=day_end, dry_run=effective_dry_run, days=len(days))
 
+    # Growth records for the same range: like the daily report, a measurement
+    # entered several days late only surfaces once the queried window reaches
+    # its entry day, so the trailing-window backfill doubles as the growth
+    # backfill. apply_range dedupes against Huckleberry's existing entries.
+    raw_growth = await _fetch_growth_records(cfg, start, day_end, child)
+    growth_records = parse_growth_records(raw_growth)
+    growth_events = plan_growth_events(growth_records, cfg.timezone)
+    result.growth = len(growth_records)
+    _LOGGER.info(
+        "Growth: %d measurement record(s) in %s..%s (dry_run=%s)",
+        len(growth_records),
+        start,
+        day_end,
+        effective_dry_run,
+    )
+
     translator = _new_translator(cfg)
     try:
         writer = HuckleberryWriter(cfg, dry_run=effective_dry_run)
@@ -273,6 +293,11 @@ async def backfill(
                 except Exception:
                     days_failed += 1
                     _LOGGER.exception("Backfill failed for %s", day)
+            if growth_events:
+                applied = await writer.apply_range(growth_events, start, day_end)
+                for kind, count in applied.written_by_kind.items():
+                    written_by_kind[kind] += count
+                total_written += applied.written
             result.days_failed = days_failed
             result.written = total_written
             result.written_by_kind = dict(written_by_kind)
@@ -350,7 +375,7 @@ async def _fetch_report(cfg: Config, day: date, child: str | None) -> DailyRepor
     client = CodmonApiClient(cfg.codmon_email, cfg.codmon_password)
     await client.start()
     try:
-        return await client.fetch_daily_report(day, child=child)
+        return await client.fetch_daily_report(day, child=child, today=cfg.today())
     finally:
         await client.stop()
 

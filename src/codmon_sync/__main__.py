@@ -193,7 +193,7 @@ def _format_sync(cfg, result: SyncResult) -> str:
 def _format_backfill(cfg, result: BackfillResult) -> str:
     lines = [
         f"range {result.start}..{result.end}",
-        f"days={result.days} failed={result.days_failed}",
+        f"days={result.days} failed={result.days_failed} growth={result.growth}",
     ]
     if result.written_by_kind:
         breakdown = ", ".join(f"{kind}={count}" for kind, count in sorted(result.written_by_kind.items()))
@@ -265,6 +265,7 @@ def _result_json(command: str, result) -> str:
             "dryRun": result.dry_run,
             "days": result.days,
             "daysFailed": result.days_failed,
+            "growth": result.growth,
             "written": result.written,
             "writtenByKind": dict(result.written_by_kind),
         }

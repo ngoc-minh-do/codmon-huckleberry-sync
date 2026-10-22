@@ -52,7 +52,9 @@ measurement is written at the date and time the nursery recorded it
 (`insert_datetime`; Codmon's `record_date` is only a month label), and a
 record is skipped if Huckleberry already has a growth entry that calendar day
 (chest circumference 胸囲 is dropped — Huckleberry has no field for it).
-Use `sync-growth` to backfill the whole history (default ~3 years) at once.
+`backfill` writes growth records for its date range too (measurements entered
+late surface once the queried window reaches their entry day), and
+`sync-growth` backfills the whole history (default ~3 years) at once.
 
 ## Local setup
 
@@ -89,9 +91,11 @@ covers today's growth records daily; use `sync-growth` to backfill history.
 
 ### Introspection (when your nursery's report layout differs)
 
-`codmon-sync introspect` shows the full parsed report body (`api_report.txt`);
-with `CODMON_TRANSPORT=browser` it dumps the rendered pages, screenshots and the
-raw API traffic for forensics.
+`codmon-sync introspect` shows the full parsed report body (`api_report.txt`),
+the raw API items as JSON (`api_items.json` — every timeline item's
+`display_date`/`insert_datetime`/`open_datetime`, useful when a report seems
+missing); with `CODMON_TRANSPORT=browser` it dumps the rendered pages,
+screenshots and the raw API traffic for forensics.
 
 ## Docker
 

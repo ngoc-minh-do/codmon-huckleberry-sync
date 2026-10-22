@@ -3,6 +3,12 @@ from __future__ import annotations
 from datetime import date, time
 from zoneinfo import ZoneInfo
 
+import pytest
+
+from codmon_sync import sync as sync_module
+from codmon_sync.codmon.api import CodmonApiClient
+from codmon_sync.config import Config
+from codmon_sync.hb.writer import ApplyResult
 from codmon_sync.mapping import plan_events
 from codmon_sync.parser import (
     ActivityEvent,
@@ -73,3 +79,140 @@ def test_plan_events_skips_unknown_evacuation():
     summary.poo_events.append(PooEvent(time=time(9, 0), value="なんか"))
     events = plan_events(summary, TZ)
     assert all(event.kind != "diaper" for event in events)
+
+
+def _api_client_with_timeline(monkeypatch, items, recorded):
+    """CodmonApiClient stub whose timeline returns fixed items and records requests."""
+    client = CodmonApiClient("a@b.c", "pw")
+
+    async def fake_ready(child=None):
+        client._service_ids = ["s1"]
+
+    async def fake_page(start, end, service_id, page=1):
+        recorded.append((start.isoformat(), end.isoformat()))
+        return {"data": items, "next_page": None}
+
+    monkeypatch.setattr(client, "_ensure_ready", fake_ready)
+    monkeypatch.setattr(client, "_timeline_page", fake_page)
+    return client
+
+
+@pytest.mark.asyncio
+async def test_fetch_daily_report_widens_window_to_catch_late_opened_posts(monkeypatch):
+    # A report whose display_date is Oct 21 but which was opened/published on
+    # Oct 22 must still be found: the timeline range request has to reach today.
+    items = [
+        {"id": "111", "kind": "4", "display_date": "2026-10-21", "content": ""},
+        {"id": "222", "kind": "4", "display_date": "2026-10-22", "content": ""},
+    ]
+    recorded = []
+    client = _api_client_with_timeline(monkeypatch, items, recorded)
+
+    report = await client.fetch_daily_report(date(2026, 10, 21), today=date(2026, 10, 22))
+
+    assert recorded == [("2026-10-21", "2026-10-22")]
+    assert [post.post_id for post in report.posts] == ["111"]  # display_date must match target
+    assert [item["id"] for item in report.raw_items] == ["111", "222"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_daily_report_same_day_window_unchanged(monkeypatch):
+    recorded = []
+    client = _api_client_with_timeline(monkeypatch, [], recorded)
+
+    await client.fetch_daily_report(date(2026, 10, 22), today=date(2026, 10, 22))
+
+    assert recorded == [("2026-10-22", "2026-10-22")]
+
+
+@pytest.mark.asyncio
+async def test_fetch_daily_report_window_is_capped_for_old_targets(monkeypatch):
+    # An old target must not paginate the whole timeline up to today: the
+    # widened window is bounded to target + 7 days.
+    recorded = []
+    client = _api_client_with_timeline(monkeypatch, [], recorded)
+
+    await client.fetch_daily_report(date(2020, 1, 1), today=date(2026, 10, 22))
+
+    assert recorded == [("2020-01-01", "2020-01-08")]
+
+
+def _config(tmp_path) -> Config:
+    return Config(
+        codmon_email="a@b.c",
+        codmon_password="pw",
+        huckleberry_email="h@b.c",
+        huckleberry_password="pw",
+        timezone_name="Asia/Tokyo",
+        dry_run=False,
+        data_dir=tmp_path,
+        headless=True,
+        sync_temperature=True,
+        sync_diaper=True,
+        sync_bath=True,
+        bath_time=time(9, 30),
+        codmon_transport="api",
+        child=None,
+        dedup_window_minutes=15,
+        translate_activity=False,
+        llm_base_url="",
+        llm_model="chat-default",
+        llm_api_key=None,
+        llm_timeout=30,
+        apprise_url=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_backfill_writes_growth_records(monkeypatch, tmp_path):
+    class FakeCodmon:
+        async def start(self):
+            return None
+
+        async def stop(self):
+            return None
+
+        async def fetch_reports_range(self, start, end, child=None):
+            return {}
+
+        async def fetch_growth_records(self, start, end, child=None):
+            return [{"insert_datetime": "2026-10-21 09:30:00", "height": "70.5", "weight": "8.2"}]
+
+    applied_ranges = []
+
+    class FakeWriter:
+        def __init__(self, config, *, dry_run):
+            pass
+
+        async def connect(self, child=None):
+            return None
+
+        async def apply(self, events, day):
+            return ApplyResult(written=0, written_by_kind={}, skipped_by_kind={})
+
+        async def apply_range(self, events, start, end):
+            applied_ranges.append((start, end, events))
+            return ApplyResult(
+                written=len(events),
+                written_by_kind={
+                    kind: sum(1 for event in events if event.kind == kind) for kind in {e.kind for e in events}
+                },
+                skipped_by_kind={},
+            )
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr(sync_module, "CodmonApiClient", lambda email, password: FakeCodmon())
+    monkeypatch.setattr(sync_module, "HuckleberryWriter", FakeWriter)
+
+    result = await sync_module.backfill(_config(tmp_path), date(2026, 10, 21), date(2026, 10, 22))
+
+    assert result.growth == 1
+    assert result.written == 1
+    assert result.written_by_kind == {"growth": 1}
+    assert len(applied_ranges) == 1
+    start, end, events = applied_ranges[0]
+    assert (start, end) == (date(2026, 10, 21), date(2026, 10, 22))
+    assert [event.kind for event in events] == ["growth"]
+    assert events[0].start.date() == date(2026, 10, 21)
